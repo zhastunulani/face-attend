@@ -1,4 +1,4 @@
-import db from '~/server/db'
+import { db } from '~/server/db'
 import { employees, departments, positions } from '~/server/db/schema'
 import { eq } from 'drizzle-orm'
 import { getAuthUser } from '~/server/utils/auth'
@@ -15,7 +15,7 @@ export default defineEventHandler(async (event) => {
       name: employees.name,
       faceDescriptor: employees.faceDescriptor,
       departmentId: employees.departmentId,
-    }).from(employees).where(eq(employees.isActive, true)).all()
+    }).from(employees).where(eq(employees.isActive, true))
     return result.filter(e => e.faceDescriptor)
   }
 
@@ -38,12 +38,12 @@ export default defineEventHandler(async (event) => {
 
   // Head sees only their department
   if (user.role === 'head' && user.departmentId) {
-    return await query_builder.where(eq(employees.departmentId, user.departmentId)).all()
+    return await query_builder.where(eq(employees.departmentId, user.departmentId))
   }
 
   if (activeOnly) {
-    return await query_builder.where(eq(employees.isActive, true)).all()
+    return await query_builder.where(eq(employees.isActive, true))
   }
 
-  return await query_builder.all()
+  return await query_builder
 })

@@ -1,4 +1,4 @@
-import db from '~/server/db'
+import { db } from '~/server/db'
 import { leaves } from '~/server/db/schema'
 import { requireAuth } from '~/server/utils/auth'
 

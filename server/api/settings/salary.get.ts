@@ -1,8 +1,9 @@
-import db from '~/server/db'
+import { db } from '~/server/db'
 import { salarySettings } from '~/server/db/schema'
 import { requireAuth } from '~/server/utils/auth'
 
 export default defineEventHandler(async (event) => {
   requireAuth(event)
-  return await db.select().from(salarySettings).get()
+  const [settings] = await db.select().from(salarySettings)
+  return settings
 })

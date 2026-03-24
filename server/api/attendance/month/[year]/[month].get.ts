@@ -1,4 +1,4 @@
-import db from '~/server/db'
+import { db } from '~/server/db'
 import { attendance, employees } from '~/server/db/schema'
 import { eq, like } from 'drizzle-orm'
 import { requireAuth } from '~/server/utils/auth'
@@ -30,7 +30,6 @@ export default defineEventHandler(async (event) => {
     .from(attendance)
     .innerJoin(employees, eq(attendance.employeeId, employees.id))
     .where(like(attendance.date, `${monthPrefix}%`))
-    .all()
 
   // Group by employee
   const grouped: Record<number, any> = {}

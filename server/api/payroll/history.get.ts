@@ -1,4 +1,4 @@
-import db from '~/server/db'
+import { db } from '~/server/db'
 import { payroll, employees } from '~/server/db/schema'
 import { eq, and } from 'drizzle-orm'
 import { requireAuth } from '~/server/utils/auth'
@@ -30,5 +30,4 @@ export default defineEventHandler(async (event) => {
     .from(payroll)
     .innerJoin(employees, eq(payroll.employeeId, employees.id))
     .where(and(eq(payroll.month, Number(month)), eq(payroll.year, Number(year))))
-    .all()
 })

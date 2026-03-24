@@ -1,4 +1,4 @@
-import db from '~/server/db'
+import { db } from '~/server/db'
 import { kpiTargets, kpiResults, attendance, employees, departments } from '~/server/db/schema'
 import { eq, like, and } from 'drizzle-orm'
 import { requireAuth } from '~/server/utils/auth'
@@ -10,14 +10,14 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Кезең форматы: YYYY-MM' })
   }
 
-  const allDepts = await db.select().from(departments).all()
-  const targets = await db.select().from(kpiTargets).where(eq(kpiTargets.period, period)).all()
+  const allDepts = await db.select().from(departments)
+  const targets = await db.select().from(kpiTargets).where(eq(kpiTargets.period, period))
 
   const results = []
 
   for (const dept of allDepts) {
     const deptEmployees = await db.select().from(employees)
-      .where(and(eq(employees.departmentId, dept.id), eq(employees.isActive, true))).all()
+      .where(and(eq(employees.departmentId, dept.id), eq(employees.isActive, true)))
 
     if (deptEmployees.length === 0) continue
 
@@ -30,7 +30,6 @@ export default defineEventHandler(async (event) => {
     for (const emp of deptEmployees) {
       const records = await db.select().from(attendance)
         .where(and(eq(attendance.employeeId, emp.id), like(attendance.date, `${period}%`)))
-        .all()
       totalPresent += records.filter(r => r.checkIn).length
       totalExpected += 22 // approximate working days
       totalOvertimeMin += records.reduce((sum, r) => sum + r.overtimeMinutes, 0)

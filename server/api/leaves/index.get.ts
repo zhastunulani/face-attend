@@ -1,4 +1,4 @@
-import db from '~/server/db'
+import { db } from '~/server/db'
 import { leaves, employees } from '~/server/db/schema'
 import { eq } from 'drizzle-orm'
 import { requireAuth } from '~/server/utils/auth'
@@ -20,7 +20,6 @@ export default defineEventHandler(async (event) => {
   })
     .from(leaves)
     .innerJoin(employees, eq(leaves.employeeId, employees.id))
-    .all()
 
   if (user.role === 'head' && user.departmentId) {
     return records.filter(r => r.departmentId === user.departmentId)

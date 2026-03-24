@@ -1,4 +1,4 @@
-import db from '~/server/db'
+import { db } from '~/server/db'
 import { employees } from '~/server/db/schema'
 import { eq } from 'drizzle-orm'
 import { requireRole } from '~/server/utils/auth'
@@ -12,7 +12,7 @@ export default defineEventHandler(async (event) => {
 
   const body = await readBody(event)
 
-  const existing = await db.select().from(employees).where(eq(employees.id, id)).get()
+  const [existing] = await db.select().from(employees).where(eq(employees.id, id))
   if (!existing) throw createError({ statusCode: 404, statusMessage: 'Қызметкер табылмады' })
 
   let photoPath = existing.photoPath

@@ -1,5 +1,5 @@
 import bcryptjs from 'bcryptjs'
-import db from '~/server/db'
+import { db } from '~/server/db'
 import { users } from '~/server/db/schema'
 import { eq } from 'drizzle-orm'
 import { requireAuth } from '~/server/utils/auth'
@@ -17,7 +17,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Жаңа пароль кемінде 8 таңба болуы керек' })
   }
 
-  const dbUser = await db.select().from(users).where(eq(users.id, user.id)).get()
+  const [dbUser] = await db.select().from(users).where(eq(users.id, user.id))
   if (!dbUser) {
     throw createError({ statusCode: 404, statusMessage: 'Қолданушы табылмады' })
   }

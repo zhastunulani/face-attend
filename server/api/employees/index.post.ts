@@ -1,4 +1,4 @@
-import db from '~/server/db'
+import { db } from '~/server/db'
 import { employees } from '~/server/db/schema'
 import { requireRole } from '~/server/utils/auth'
 import { writeFileSync, existsSync, mkdirSync } from 'fs'

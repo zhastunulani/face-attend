@@ -1,4 +1,4 @@
-import db from '~/server/db'
+import { db } from '~/server/db'
 import { kpiTargets } from '~/server/db/schema'
 import { requireRole } from '~/server/utils/auth'
 

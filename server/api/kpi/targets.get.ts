@@ -1,11 +1,10 @@
-import db from '~/server/db'
+import { db } from '~/server/db'
 import { kpiTargets, departments } from '~/server/db/schema'
 import { eq } from 'drizzle-orm'
 import { requireAuth } from '~/server/utils/auth'
 
 export default defineEventHandler(async (event) => {
   requireAuth(event)
-  const query = getQuery(event)
 
   return await db.select({
     id: kpiTargets.id,
@@ -17,5 +16,4 @@ export default defineEventHandler(async (event) => {
   })
     .from(kpiTargets)
     .leftJoin(departments, eq(kpiTargets.departmentId, departments.id))
-    .all()
 })

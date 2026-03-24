@@ -1,4 +1,4 @@
-import db from '~/server/db'
+import { db } from '~/server/db'
 import { payroll, attendance, employees, salarySettings } from '~/server/db/schema'
 import { eq, like, and } from 'drizzle-orm'
 import { requireRole } from '~/server/utils/auth'
@@ -12,18 +12,17 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Ай мен жыл қажет' })
   }
 
-  const settings = await db.select().from(salarySettings).get()
+  const [settings] = await db.select().from(salarySettings)
   if (!settings) throw createError({ statusCode: 500, statusMessage: 'Айлық баптаулары табылмады' })
 
   const monthPrefix = `${year}-${String(month).padStart(2, '0')}`
-  const activeEmployees = await db.select().from(employees).where(eq(employees.isActive, true)).all()
+  const activeEmployees = await db.select().from(employees).where(eq(employees.isActive, true))
 
   const results = []
 
   for (const emp of activeEmployees) {
     const records = await db.select().from(attendance)
       .where(and(eq(attendance.employeeId, emp.id), like(attendance.date, `${monthPrefix}%`)))
-      .all()
 
     let totalWorkMinutes = 0
     let totalOvertimeMinutes = 0
@@ -50,9 +49,8 @@ export default defineEventHandler(async (event) => {
     const totalAmount = baseAmount + overtimeAmount
 
     // Upsert payroll record
-    const existing = await db.select().from(payroll)
+    const [existing] = await db.select().from(payroll)
       .where(and(eq(payroll.employeeId, emp.id), eq(payroll.month, month), eq(payroll.year, year)))
-      .get()
 
     const payrollData = {
       employeeId: emp.id,

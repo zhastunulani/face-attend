@@ -1,8 +1,6 @@
-import db from '~/server/db'
+import { db } from '~/server/db'
 import { attendance, employees, schedules } from '~/server/db/schema'
 import { eq, and } from 'drizzle-orm'
-import { writeFileSync, existsSync, mkdirSync } from 'fs'
-import { resolve } from 'path'
 
 export default defineEventHandler(async (event) => {
   const body = await readBody(event)
@@ -12,7 +10,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'employee_id және type қажет' })
   }
 
-  const employee = await db.select().from(employees).where(eq(employees.id, employeeId)).get()
+  const [employee] = await db.select().from(employees).where(eq(employees.id, employeeId))
   if (!employee || !employee.isActive) {
     throw createError({ statusCode: 404, statusMessage: 'Қызметкер табылмады' })
   }
@@ -24,6 +22,8 @@ export default defineEventHandler(async (event) => {
   // Save photo
   let photoPath: string | null = null
   if (photo) {
+    const { writeFileSync, existsSync, mkdirSync } = await import('fs')
+    const { resolve } = await import('path')
     const uploadsDir = resolve(process.cwd(), 'public/uploads/checkins')
     if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true })
     const filename = `checkin_${employeeId}_${Date.now()}.jpg`
@@ -33,9 +33,8 @@ export default defineEventHandler(async (event) => {
   }
 
   // Check existing record for today
-  const existing = await db.select().from(attendance)
+  const [existing] = await db.select().from(attendance)
     .where(and(eq(attendance.employeeId, employeeId), eq(attendance.date, date)))
-    .get()
 
   // Check-in
   if (type === 'in') {
@@ -47,7 +46,7 @@ export default defineEventHandler(async (event) => {
     let isLate = false
     let lateMinutes = 0
     if (employee.scheduleId) {
-      const schedule = await db.select().from(schedules).where(eq(schedules.id, employee.scheduleId)).get()
+      const [schedule] = await db.select().from(schedules).where(eq(schedules.id, employee.scheduleId))
       if (schedule) {
         const [schedH, schedM] = schedule.workStart.split(':').map(Number)
         const [nowH, nowM] = time.split(':').map(Number)
@@ -101,7 +100,7 @@ export default defineEventHandler(async (event) => {
     // Calculate overtime
     let overtimeMinutes = 0
     if (employee.scheduleId) {
-      const schedule = await db.select().from(schedules).where(eq(schedules.id, employee.scheduleId)).get()
+      const [schedule] = await db.select().from(schedules).where(eq(schedules.id, employee.scheduleId))
       if (schedule) {
         const [endH, endM] = schedule.workEnd.split(':').map(Number)
         const schedEndMin = endH * 60 + endM

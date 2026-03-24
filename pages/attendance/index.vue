@@ -91,7 +91,8 @@
         <h2 class="text-lg font-semibold">Айлық есеп</h2>
         <div class="flex items-center gap-2">
           <input v-model="selectedMonth" type="month" class="input w-auto" @change="fetchMonthly" />
-          <button class="btn-secondary text-sm" @click="exportCSV">CSV экспорт</button>
+          <button class="btn-secondary text-sm" @click="exportCSV">CSV</button>
+          <button class="btn-primary text-sm" @click="exportExcel">Excel</button>
         </div>
       </div>
 
@@ -184,6 +185,11 @@ const exportCSV = () => {
   a.download = `attendance_${selectedMonth.value}.csv`
   a.click()
   URL.revokeObjectURL(url)
+}
+
+const exportExcel = () => {
+  const [year, month] = selectedMonth.value.split('-')
+  window.open(`/api/attendance/export-excel?year=${year}&month=${month}`, '_blank')
 }
 
 watch(activeTab, (tab) => {

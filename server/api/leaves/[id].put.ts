@@ -1,4 +1,4 @@
-import db from '~/server/db'
+import { db } from '~/server/db'
 import { leaves, employees } from '~/server/db/schema'
 import { eq } from 'drizzle-orm'
 import { requireRole } from '~/server/utils/auth'
@@ -15,12 +15,12 @@ export default defineEventHandler(async (event) => {
 
   // If approved vacation, deduct days
   if (body.status === 'approved') {
-    const leave = await db.select().from(leaves).where(eq(leaves.id, id)).get()
+    const [leave] = await db.select().from(leaves).where(eq(leaves.id, id))
     if (leave && leave.type === 'vacation') {
       const start = new Date(leave.startDate)
       const end = new Date(leave.endDate)
       const days = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1
-      const emp = await db.select().from(employees).where(eq(employees.id, leave.employeeId)).get()
+      const [emp] = await db.select().from(employees).where(eq(employees.id, leave.employeeId))
       if (emp) {
         await db.update(employees).set({
           vacationDaysLeft: Math.max(0, emp.vacationDaysLeft - days),

@@ -1,5 +1,5 @@
 import bcryptjs from 'bcryptjs'
-import db from '~/server/db'
+import { db } from '~/server/db'
 import { users } from '~/server/db/schema'
 import { eq } from 'drizzle-orm'
 import { signToken } from '~/server/utils/auth'
@@ -12,7 +12,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Логин мен пароль қажет' })
   }
 
-  const user = await db.select().from(users).where(eq(users.login, login)).get()
+  const [user] = await db.select().from(users).where(eq(users.login, login))
 
   if (!user || !user.isActive) {
     throw createError({ statusCode: 401, statusMessage: 'Логин немесе пароль қате' })

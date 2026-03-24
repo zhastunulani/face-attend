@@ -6,6 +6,7 @@ export default defineNuxtConfig({
 
   runtimeConfig: {
     jwtSecret: process.env.JWT_SECRET || 'face-attend-secret-change-in-production-2026',
+    databaseUrl: process.env.DATABASE_URL || 'postgresql://localhost:5432/faceattend',
     public: {
       apiBase: '/api',
     },
