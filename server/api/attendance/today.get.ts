@@ -1,11 +1,13 @@
 import { db } from '~/server/db'
 import { attendance, employees } from '~/server/db/schema'
 import { eq, and } from 'drizzle-orm'
-import { requireAuth } from '~/server/utils/auth'
+import { requireAuth, departmentScope } from '~/server/utils/auth'
+import { localNow } from '~/server/utils/time'
 
 export default defineEventHandler(async (event) => {
-  const user = requireAuth(event)
-  const today = new Date().toISOString().split('T')[0]
+  const user = await requireAuth(event)
+  const today = localNow().date
+  const scope = departmentScope(user)
 
   const records = await db.select({
     id: attendance.id,
@@ -24,18 +26,14 @@ export default defineEventHandler(async (event) => {
     .where(eq(attendance.date, today))
 
   // Filter by department for head role
-  const filtered = user.role === 'head' && user.departmentId
-    ? records.filter(r => r.departmentId === user.departmentId)
-    : records
+  const filtered = scope !== null ? records.filter(r => r.departmentId === scope) : records
 
   // Get all active employees for absent calculation
   const allEmployees = await db.select({ id: employees.id, name: employees.name, departmentId: employees.departmentId })
     .from(employees).where(eq(employees.isActive, true))
 
-  const presentIds = new Set(filtered.map(r => r.employeeId))
-  const relevantEmployees = user.role === 'head' && user.departmentId
-    ? allEmployees.filter(e => e.departmentId === user.departmentId)
-    : allEmployees
+  const presentIds = new Set(filtered.filter(r => r.checkIn).map(r => r.employeeId))
+  const relevantEmployees = scope !== null ? allEmployees.filter(e => e.departmentId === scope) : allEmployees
   const absent = relevantEmployees.filter(e => !presentIds.has(e.id))
 
   return {
@@ -44,7 +42,7 @@ export default defineEventHandler(async (event) => {
     absent,
     stats: {
       total: relevantEmployees.length,
-      presentCount: filtered.length,
+      presentCount: presentIds.size,
       absentCount: absent.length,
       lateCount: filtered.filter(r => r.isLate).length,
     },

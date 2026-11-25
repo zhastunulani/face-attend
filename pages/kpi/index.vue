@@ -1,8 +1,8 @@
 <template>
-  <div class="max-w-6xl mx-auto px-4 py-6">
+  <div class="page !max-w-6xl">
     <div class="mb-6">
-      <h1 class="text-2xl font-bold text-gray-900">KPI</h1>
-      <p class="text-gray-500 mt-1">Бөлімдер бойынша тиімділік көрсеткіштері</p>
+      <h1 class="page-title">KPI</h1>
+      <p class="page-subtitle">Бөлімдер бойынша тиімділік көрсеткіштері</p>
     </div>
 
     <!-- Period selector -->
@@ -115,6 +115,7 @@
 </template>
 
 <script setup lang="ts">
+const { notifyError } = useNotify()
 const now = new Date()
 const selectedPeriod = ref(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
 
@@ -146,7 +147,7 @@ const fetchResults = async () => {
     const data = await $fetch<any>(`/api/kpi/results/${selectedPeriod.value}`)
     results.value = data.results || data || []
   } catch (e) {
-    console.error(e)
+    notifyError(e)
   } finally {
     loading.value = false
   }
@@ -156,7 +157,7 @@ const fetchDepartments = async () => {
   try {
     departments.value = await $fetch<any[]>('/api/departments')
   } catch (e) {
-    console.error(e)
+    notifyError(e)
   }
 }
 
@@ -176,11 +177,11 @@ const handleAddTarget = async () => {
     showTargetModal.value = false
     await fetchResults()
   } catch (e) {
-    console.error(e)
+    notifyError(e)
   } finally {
     savingTarget.value = false
   }
 }
 
-fetchDepartments()
+onMounted(fetchDepartments)
 </script>

@@ -1,9 +1,9 @@
 <template>
-  <div class="max-w-4xl mx-auto px-4 py-6">
+  <div class="page !max-w-4xl">
     <div class="flex items-center justify-between mb-6">
       <div>
-        <h1 class="text-2xl font-bold text-gray-900">Лауазымдар</h1>
-        <p class="text-gray-500 mt-1">Лауазымдарды басқару</p>
+        <h1 class="page-title">Лауазымдар</h1>
+        <p class="page-subtitle">Лауазымдарды басқару</p>
       </div>
       <button class="btn-primary" @click="openModal()">+ Қосу</button>
     </div>
@@ -63,6 +63,7 @@
 </template>
 
 <script setup lang="ts">
+const { notifyError } = useNotify()
 const positions = ref<any[]>([])
 const departments = ref<any[]>([])
 const loading = ref(true)
@@ -85,7 +86,7 @@ const fetchData = async () => {
     positions.value = posData
     departments.value = deptData
   } catch (e) {
-    console.error(e)
+    notifyError(e)
   } finally {
     loading.value = false
   }
@@ -116,7 +117,7 @@ const handleSave = async () => {
     showModal.value = false
     await fetchData()
   } catch (e) {
-    console.error(e)
+    notifyError(e)
   } finally {
     saving.value = false
   }
@@ -128,9 +129,9 @@ const handleDelete = async (id: number) => {
     await $fetch(`/api/positions/${id}`, { method: 'DELETE' })
     await fetchData()
   } catch (e) {
-    console.error(e)
+    notifyError(e)
   }
 }
 
-fetchData()
+onMounted(fetchData)
 </script>

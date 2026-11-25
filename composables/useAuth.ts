@@ -3,11 +3,15 @@ interface User {
   login: string
   name: string
   role: 'admin' | 'head' | 'manager'
-  departmentId?: number
+  departmentId?: number | null
+  mustChangePassword?: boolean
 }
 
 export const useAuth = () => {
   const user = useState<User | null>('auth_user', () => null)
+  // SSR кезінде $fetch браузердің cookie-ін жібермейді — сондықтан бетті жаңартқанда
+  // жүйе «кірмеген» деп логинге қайтаратын. useRequestFetch бастапқы сұраныстың cookie-ін береді.
+  const requestFetch = useRequestFetch()
   const isLoggedIn = computed(() => !!user.value)
 
   const login = async (loginStr: string, password: string) => {
@@ -27,7 +31,7 @@ export const useAuth = () => {
 
   const fetchUser = async () => {
     try {
-      const data = await $fetch<{ user: User }>('/api/auth/me')
+      const data = await requestFetch<{ user: User }>('/api/auth/me')
       user.value = data.user
     } catch {
       user.value = null

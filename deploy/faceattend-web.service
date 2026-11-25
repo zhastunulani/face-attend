@@ -1,0 +1,24 @@
+[Unit]
+Description=FaceAttend — учёт рабочего времени по лицу (face-attent.zhastunulani.kz)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=faceattend
+Group=faceattend
+WorkingDirectory=/opt/faceattend/app
+# DATABASE_URL (Neon), JWT_SECRET, APP_TIMEZONE
+EnvironmentFile=/etc/faceattend/env
+Environment=HOST=127.0.0.1
+Environment=PORT=4350
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node .output/server/index.mjs
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

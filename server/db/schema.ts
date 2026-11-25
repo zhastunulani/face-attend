@@ -16,6 +16,8 @@ export const users = pgTable('users', {
   role: text('role').notNull().default('manager'),
   departmentId: integer('department_id').references(() => departments.id),
   isActive: boolean('is_active').notNull().default(true),
+  tokenVersion: integer('token_version').notNull().default(0),
+  mustChangePassword: boolean('must_change_password').notNull().default(false),
   createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
 })
 
@@ -70,6 +72,9 @@ export const attendance = pgTable('attendance', {
   lateMinutes: integer('late_minutes').notNull().default(0),
   overtimeMinutes: integer('overtime_minutes').notNull().default(0),
   status: text('status').notNull().default('present'),
+  source: text('source'), // 'kiosk:<id>' | 'user:<id>' | 'manual:<userId>'
+  note: text('note'), // қолмен түзету себебі
+  matchDistance: real('match_distance'),
 }, (table) => [
   unique('attendance_employee_date').on(table.employeeId, table.date),
 ])
@@ -107,6 +112,10 @@ export const payroll = pgTable('payroll', {
   workDays: integer('work_days').notNull().default(0),
   workHours: real('work_hours').notNull().default(0),
   overtimeHours: real('overtime_hours').notNull().default(0),
+  regularHours: real('regular_hours').notNull().default(0),
+  weekendHours: real('weekend_hours').notNull().default(0),
+  weekendAmount: real('weekend_amount').notNull().default(0),
+  plannedDays: integer('planned_days').notNull().default(0),
   baseAmount: real('base_amount').notNull().default(0),
   overtimeAmount: real('overtime_amount').notNull().default(0),
   deductions: real('deductions').notNull().default(0),
@@ -152,5 +161,25 @@ export const auditLog = pgTable('audit_log', {
   userId: integer('user_id').references(() => users.id),
   action: text('action').notNull(),
   details: text('details'),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+})
+
+// ==================== Киоск құрылғылары ====================
+
+export const kiosks = pgTable('kiosks', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull(),
+  createdBy: integer('created_by').references(() => users.id),
+  mode: text('mode').notNull().default('auto'), // 'auto' | 'in' | 'out' — кіреберіс/шығатын есік
+  isRevoked: boolean('is_revoked').notNull().default(false),
+  lastSeenAt: text('last_seen_at'),
+  createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
+})
+
+// ==================== Мерекелер ====================
+
+export const holidays = pgTable('holidays', {
+  date: text('date').primaryKey(), // YYYY-MM-DD
+  name: text('name').notNull(),
   createdAt: text('created_at').notNull().$defaultFn(() => new Date().toISOString()),
 })

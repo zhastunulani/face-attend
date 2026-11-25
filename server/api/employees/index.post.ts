@@ -1,48 +1,25 @@
 import { db } from '~/server/db'
 import { employees } from '~/server/db/schema'
 import { requireRole } from '~/server/utils/auth'
-import { writeFileSync, existsSync, mkdirSync } from 'fs'
-import { resolve } from 'path'
+import { parseEmployeeInput } from '~/server/utils/employeeInput'
+import { saveImage } from '~/server/utils/files'
+import { invalidateFaceCache } from '~/server/utils/face'
+import { audit } from '~/server/utils/audit'
 
 export default defineEventHandler(async (event) => {
-  requireRole(event, ['admin', 'head'])
+  const user = await requireRole(event, ['admin', 'head'])
   const body = await readBody(event)
-
-  if (!body.name?.trim()) {
-    throw createError({ statusCode: 400, statusMessage: 'Аты-жөні қажет' })
+  if (body?.name === undefined) {
+    throw createError({ statusCode: 400, statusMessage: 'Bad name', message: 'Аты-жөні қажет' })
   }
 
-  let photoPath: string | null = null
-  if (body.photo) {
-    const uploadsDir = resolve(process.cwd(), 'public/uploads/employees')
-    if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true })
-    const filename = `emp_${Date.now()}.jpg`
-    const base64Data = body.photo.replace(/^data:image\/\w+;base64,/, '')
-    writeFileSync(resolve(uploadsDir, filename), Buffer.from(base64Data, 'base64'))
-    photoPath = `/uploads/employees/${filename}`
-  }
+  const data = await parseEmployeeInput(body, user)
+  if (body.photo) data.photoPath = await saveImage(body.photo, 'employee')
 
-  // Validate face descriptor
-  if (body.faceDescriptor) {
-    try {
-      const arr = JSON.parse(body.faceDescriptor)
-      if (!Array.isArray(arr) || arr.length !== 128) {
-        throw new Error()
-      }
-    } catch {
-      throw createError({ statusCode: 400, statusMessage: 'Face descriptor форматы қате (128 сан қажет)' })
-    }
-  }
+  const [created] = await db.insert(employees).values(data as typeof employees.$inferInsert).returning()
+  invalidateFaceCache()
+  await audit(user.id, 'employee_created', { employeeId: created.id, hasFace: !!created.faceDescriptor })
 
-  const result = await db.insert(employees).values({
-    name: body.name.trim(),
-    departmentId: body.departmentId || null,
-    positionId: body.positionId || null,
-    photoPath,
-    faceDescriptor: body.faceDescriptor || null,
-    scheduleId: body.scheduleId || null,
-    salaryRate: body.salaryRate || 0,
-  }).returning()
-
-  return result[0]
+  const { faceDescriptor, ...rest } = created
+  return { ...rest, hasFace: !!faceDescriptor }
 })

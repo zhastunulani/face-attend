@@ -1,12 +1,14 @@
 import { db } from '~/server/db'
 import { attendance, employees } from '~/server/db/schema'
-import { eq } from 'drizzle-orm'
-import { requireAuth } from '~/server/utils/auth'
+import { eq, and } from 'drizzle-orm'
+import { requireAuth, departmentScope } from '~/server/utils/auth'
+import { isValidDate } from '~/server/utils/time'
 
 export default defineEventHandler(async (event) => {
-  requireAuth(event)
+  const user = await requireAuth(event)
+  const scope = departmentScope(user)
   const date = getRouterParam(event, 'date')
-  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  if (!isValidDate(date)) {
     throw createError({ statusCode: 400, statusMessage: 'Күн форматы: YYYY-MM-DD' })
   }
 
@@ -23,5 +25,5 @@ export default defineEventHandler(async (event) => {
   })
     .from(attendance)
     .innerJoin(employees, eq(attendance.employeeId, employees.id))
-    .where(eq(attendance.date, date))
+    .where(scope !== null ? and(eq(attendance.date, date), eq(employees.departmentId, scope)) : eq(attendance.date, date))
 })

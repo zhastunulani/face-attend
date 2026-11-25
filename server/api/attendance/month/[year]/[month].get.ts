@@ -1,67 +1,91 @@
+import { and, eq, inArray, lte, gte, or, type SQL } from 'drizzle-orm'
 import { db } from '~/server/db'
-import { attendance, employees } from '~/server/db/schema'
-import { eq, like } from 'drizzle-orm'
-import { requireAuth } from '~/server/utils/auth'
+import { employees, schedules, leaves } from '~/server/db/schema'
+import { requireAuth, departmentScope } from '~/server/utils/auth'
+import { parsePeriod, monthAttendance } from '~/server/utils/period'
+import { workedMinutes, weekdayOf, monthDays, parseWorkDays, localNow } from '~/server/utils/time'
+import { loadHolidays, monthRange } from '~/server/utils/holidays'
 
+/**
+ * Айлық табель-тор: әр қызметкер × әр күн.
+ * Келмеген күндер = кесте бойынша жұмыс күні (бүгінге дейін), мереке емес, бекітілген демалыста емес, белгі жоқ.
+ */
 export default defineEventHandler(async (event) => {
-  requireAuth(event)
-  const year = getRouterParam(event, 'year')
-  const month = getRouterParam(event, 'month')
+  const user = await requireAuth(event)
+  const { year, month, prefix } = parsePeriod(getRouterParam(event, 'year'), getRouterParam(event, 'month'))
+  const scope = departmentScope(user)
+  const { from, to } = monthRange(year, month)
+  const today = localNow().date
 
-  if (!year || !month) {
-    throw createError({ statusCode: 400, statusMessage: 'Жыл мен ай қажет' })
-  }
+  const records = await monthAttendance(prefix, scope)
+  const withRecords = [...new Set(records.map(r => r.employeeId))]
 
-  const monthPrefix = `${year}-${month.padStart(2, '0')}`
+  // Белсенді қызметкерлер + осы айда белгісі бар (кейін шығарылған) қызметкерлер
+  const conds: SQL[] = [withRecords.length ? or(eq(employees.isActive, true), inArray(employees.id, withRecords))! : eq(employees.isActive, true)]
+  if (scope !== null) conds.push(eq(employees.departmentId, scope))
+  const emps = await db.select({
+    id: employees.id, name: employees.name, departmentId: employees.departmentId, scheduleId: employees.scheduleId,
+  }).from(employees).where(and(...conds)).orderBy(employees.name)
 
-  const records = await db.select({
-    id: attendance.id,
-    employeeId: attendance.employeeId,
-    employeeName: employees.name,
-    departmentId: employees.departmentId,
-    date: attendance.date,
-    checkIn: attendance.checkIn,
-    checkOut: attendance.checkOut,
-    isLate: attendance.isLate,
-    lateMinutes: attendance.lateMinutes,
-    overtimeMinutes: attendance.overtimeMinutes,
-    status: attendance.status,
-  })
-    .from(attendance)
-    .innerJoin(employees, eq(attendance.employeeId, employees.id))
-    .where(like(attendance.date, `${monthPrefix}%`))
+  const scheduleMap = new Map((await db.select().from(schedules)).map(s => [s.id, s]))
+  const holidayMap = await loadHolidays(from, to)
+  const approvedLeaves = await db.select().from(leaves).where(and(
+    eq(leaves.status, 'approved'), lte(leaves.startDate, to), gte(leaves.endDate, from),
+  ))
 
-  // Group by employee
-  const grouped: Record<number, any> = {}
-  for (const r of records) {
-    if (!grouped[r.employeeId]) {
-      grouped[r.employeeId] = {
-        employeeId: r.employeeId,
-        employeeName: r.employeeName,
-        departmentId: r.departmentId,
-        records: [],
-        totalWorkMinutes: 0,
-        totalOvertimeMinutes: 0,
-        totalLateMinutes: 0,
-        daysPresent: 0,
-        daysLate: 0,
+  const days = monthDays(year, month).map(date => ({
+    date,
+    weekday: weekdayOf(date),
+    holiday: holidayMap.get(date) ?? null,
+  }))
+
+  const result = emps.map((emp) => {
+    const workDays = parseWorkDays(emp.scheduleId ? scheduleMap.get(emp.scheduleId)?.workDays : null)
+    const empLeaves = approvedLeaves.filter(l => l.employeeId === emp.id)
+    const cells: Record<string, any> = {}
+    const leaveDays: Record<string, string> = {}
+    let daysPresent = 0, daysLate = 0, absentDays = 0, plannedDays = 0
+    let totalWorkMinutes = 0, totalOvertimeMinutes = 0, totalLateMinutes = 0
+
+    for (const r of records) {
+      if (r.employeeId !== emp.id) continue
+      cells[r.date] = {
+        id: r.id, checkIn: r.checkIn, checkOut: r.checkOut, isLate: r.isLate,
+        lateMinutes: r.lateMinutes, overtimeMinutes: r.overtimeMinutes,
       }
+      if (!r.checkIn) continue
+      daysPresent++
+      if (r.isLate) { daysLate++; totalLateMinutes += r.lateMinutes }
+      totalOvertimeMinutes += r.overtimeMinutes
+      if (r.checkOut) totalWorkMinutes += workedMinutes(r.checkIn, r.checkOut)
     }
-    grouped[r.employeeId].records.push(r)
-    grouped[r.employeeId].daysPresent++
-    if (r.isLate) grouped[r.employeeId].daysLate++
-    grouped[r.employeeId].totalLateMinutes += r.lateMinutes
-    grouped[r.employeeId].totalOvertimeMinutes += r.overtimeMinutes
 
-    if (r.checkIn && r.checkOut) {
-      const [inH, inM] = r.checkIn.split(':').map(Number)
-      const [outH, outM] = r.checkOut.split(':').map(Number)
-      grouped[r.employeeId].totalWorkMinutes += (outH * 60 + outM) - (inH * 60 + inM)
+    for (const d of days) {
+      const leave = empLeaves.find(l => l.startDate <= d.date && d.date <= l.endDate)
+      if (leave) leaveDays[d.date] = leave.type
+      const isWorkDay = workDays.includes(d.weekday) && !d.holiday
+      if (!isWorkDay) continue
+      plannedDays++
+      if (d.date <= today && !leave && !cells[d.date]?.checkIn) absentDays++
     }
-  }
 
-  return {
-    month: monthPrefix,
-    employees: Object.values(grouped),
-  }
+    return {
+      employeeId: emp.id,
+      employeeName: emp.name,
+      departmentId: emp.departmentId,
+      workDays,
+      plannedDays,
+      daysPresent,
+      daysLate,
+      absentDays,
+      leaveDayCount: Object.keys(leaveDays).length,
+      totalWorkMinutes,
+      totalOvertimeMinutes,
+      totalLateMinutes,
+      cells,
+      leaveDays,
+    }
+  })
+
+  return { month: prefix, today, days, employees: result }
 })

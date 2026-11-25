@@ -1,9 +1,9 @@
 <template>
-  <div class="max-w-5xl mx-auto px-4 py-6">
+  <div class="page !max-w-5xl">
     <div class="flex items-center justify-between mb-6">
       <div>
-        <h1 class="text-2xl font-bold text-gray-900">Жұмыс кестелері</h1>
-        <p class="text-gray-500 mt-1">Жұмыс уақытын басқару</p>
+        <h1 class="page-title">Жұмыс кестелері</h1>
+        <p class="page-subtitle">Жұмыс уақытын басқару</p>
       </div>
       <button class="btn-primary" @click="openModal()">+ Қосу</button>
     </div>
@@ -112,6 +112,7 @@
 </template>
 
 <script setup lang="ts">
+const { notifyError } = useNotify()
 const dayLabels = ['Дс', 'Сс', 'Ср', 'Бс', 'Жм', 'Сб', 'Жк']
 const dayLabelsFull = ['Дүйсенбі', 'Сейсенбі', 'Сәрсенбі', 'Бейсенбі', 'Жұма', 'Сенбі', 'Жексенбі']
 
@@ -155,7 +156,7 @@ const fetchSchedules = async () => {
   try {
     schedules.value = await $fetch<any[]>('/api/schedules')
   } catch (e) {
-    console.error(e)
+    notifyError(e)
   } finally {
     loading.value = false
   }
@@ -199,7 +200,7 @@ const handleSave = async () => {
     showModal.value = false
     await fetchSchedules()
   } catch (e) {
-    console.error(e)
+    notifyError(e)
   } finally {
     saving.value = false
   }
@@ -211,9 +212,9 @@ const handleDelete = async (id: number) => {
     await $fetch(`/api/schedules/${id}`, { method: 'DELETE' })
     await fetchSchedules()
   } catch (e) {
-    console.error(e)
+    notifyError(e)
   }
 }
 
-fetchSchedules()
+onMounted(fetchSchedules)
 </script>

@@ -1,8 +1,8 @@
 <template>
-  <div class="max-w-6xl mx-auto px-4 py-6">
+  <div class="page !max-w-6xl">
     <div class="mb-6">
-      <h1 class="text-2xl font-bold text-gray-900">Жалақы есебі</h1>
-      <p class="text-gray-500 mt-1">Ай сайынғы жалақы есептеу</p>
+      <h1 class="page-title">Жалақы есебі</h1>
+      <p class="page-subtitle">Ай сайынғы жалақы есептеу</p>
     </div>
 
     <!-- Controls -->
@@ -22,7 +22,7 @@
         </div>
         <div class="flex gap-2">
           <button class="btn-secondary" @click="fetchHistory">Көру</button>
-          <button class="btn-primary" :disabled="calculating" @click="calculate">
+          <button v-if="isAdmin" class="btn-primary" :disabled="calculating" @click="calculate">
             {{ calculating ? 'Есептелуде...' : 'Есептеу' }}
           </button>
         </div>
@@ -33,7 +33,7 @@
     <div class="card">
       <div v-if="loading" class="text-center py-8 text-gray-400">Жүктелуде...</div>
       <div v-else-if="!records.length" class="text-center py-8 text-gray-400">
-        Деректер жоқ. "Есептеу" батырмасын басыңыз.
+        Деректер жоқ.<template v-if="isAdmin"> "Есептеу" батырмасын басыңыз.</template>
       </div>
       <div v-else class="overflow-x-auto">
         <table class="w-full text-sm">
@@ -45,18 +45,20 @@
               <th class="pb-3 font-semibold text-gray-600 text-right">Үстеме сағ.</th>
               <th class="pb-3 font-semibold text-gray-600 text-right">Негізгі</th>
               <th class="pb-3 font-semibold text-gray-600 text-right">Үстеме</th>
+              <th class="pb-3 font-semibold text-gray-600 text-right">Демалыс күні</th>
               <th class="pb-3 font-semibold text-gray-600 text-right">Жиыны</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="r in records" :key="r.employeeId" class="border-b border-gray-100 hover:bg-gray-50">
               <td class="py-3 font-medium">{{ r.employeeName }}</td>
-              <td class="py-3 text-right">{{ r.workDays }}</td>
+              <td class="py-3 text-right">{{ r.workDays }}<span v-if="r.plannedDays" class="text-gray-400"> / {{ r.plannedDays }}</span></td>
               <td class="py-3 text-right">{{ r.workHours }}</td>
               <td class="py-3 text-right">{{ r.overtimeHours }}</td>
               <td class="py-3 text-right">{{ formatKZT(r.baseAmount) }}</td>
               <td class="py-3 text-right">{{ formatKZT(r.overtimeAmount) }}</td>
-              <td class="py-3 text-right font-semibold">{{ formatKZT(r.total) }}</td>
+              <td class="py-3 text-right">{{ formatKZT(r.weekendAmount) }}</td>
+              <td class="py-3 text-right font-semibold">{{ formatKZT(r.totalAmount) }}</td>
             </tr>
           </tbody>
           <tfoot>
@@ -67,6 +69,7 @@
               <td class="py-3 text-right font-bold">{{ totals.overtimeHours }}</td>
               <td class="py-3 text-right font-bold">{{ formatKZT(totals.baseAmount) }}</td>
               <td class="py-3 text-right font-bold">{{ formatKZT(totals.overtimeAmount) }}</td>
+              <td class="py-3 text-right font-bold">{{ formatKZT(totals.weekendAmount) }}</td>
               <td class="py-3 text-right font-bold text-primary-600">{{ formatKZT(totals.total) }}</td>
             </tr>
           </tfoot>
@@ -77,6 +80,8 @@
 </template>
 
 <script setup lang="ts">
+const { notifyError } = useNotify()
+const { isAdmin } = useAuth()
 const monthNames = [
   'Қаңтар', 'Ақпан', 'Наурыз', 'Сәуір', 'Мамыр', 'Маусым',
   'Шілде', 'Тамыз', 'Қыркүйек', 'Қазан', 'Қараша', 'Желтоқсан',
@@ -104,9 +109,10 @@ const totals = computed(() => {
       overtimeHours: acc.overtimeHours + (r.overtimeHours || 0),
       baseAmount: acc.baseAmount + (r.baseAmount || 0),
       overtimeAmount: acc.overtimeAmount + (r.overtimeAmount || 0),
-      total: acc.total + (r.total || 0),
+      weekendAmount: acc.weekendAmount + (r.weekendAmount || 0),
+      total: acc.total + (r.totalAmount || 0),
     }),
-    { workDays: 0, workHours: 0, overtimeHours: 0, baseAmount: 0, overtimeAmount: 0, total: 0 }
+    { workDays: 0, workHours: 0, overtimeHours: 0, baseAmount: 0, overtimeAmount: 0, weekendAmount: 0, total: 0 }
   )
 })
 
@@ -116,9 +122,9 @@ const fetchHistory = async () => {
     const data = await $fetch<any>('/api/payroll/history', {
       params: { month: selectedMonth.value, year: selectedYear.value },
     })
-    records.value = data.records || data || []
+    records.value = Array.isArray(data) ? data : []
   } catch (e) {
-    console.error(e)
+    notifyError(e)
   } finally {
     loading.value = false
   }
@@ -131,11 +137,13 @@ const calculate = async () => {
       method: 'POST',
       body: { month: selectedMonth.value, year: selectedYear.value },
     })
-    records.value = data.records || data || []
+    records.value = data.results || []
   } catch (e) {
-    console.error(e)
+    notifyError(e)
   } finally {
     calculating.value = false
   }
 }
+
+onMounted(fetchHistory)
 </script>

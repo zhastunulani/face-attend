@@ -3,7 +3,7 @@ import { kpiTargets } from '~/server/db/schema'
 import { requireRole } from '~/server/utils/auth'
 
 export default defineEventHandler(async (event) => {
-  requireRole(event, ['admin'])
+  await requireRole(event, ['admin'])
   const body = await readBody(event)
 
   if (!body.departmentId || !body.metric || !body.targetValue || !body.period) {

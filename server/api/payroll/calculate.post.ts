@@ -1,70 +1,91 @@
 import { db } from '~/server/db'
-import { payroll, attendance, employees, salarySettings } from '~/server/db/schema'
+import { payroll, attendance, employees, salarySettings, schedules } from '~/server/db/schema'
 import { eq, like, and } from 'drizzle-orm'
 import { requireRole } from '~/server/utils/auth'
+import { parsePeriod } from '~/server/utils/period'
+import { workedMinutes, weekdayOf, parseWorkDays, plannedWorkDates } from '~/server/utils/time'
+import { audit } from '~/server/utils/audit'
+import { loadHolidays, monthRange } from '~/server/utils/holidays'
 
+/**
+ * Жалақы есебі (salaryRate = айлық оклад):
+ *   сағаттық мөлшерлеме = оклад / (айдағы жоспарлы жұмыс күндері × күндік стандарт сағат)
+ *   қалыпты сағат  = әр жұмыс күнінде min(жұмыс − үстеме, стандарт) — түскі үзіліс төленбейді
+ *   үстеме сағат   = кесте аяқталғаннан кейінгі уақыт × overtimeCoefficient
+ *   демалыс күні   = кестеде жоқ немесе мереке күні жұмыс істелген уақыт × weekendCoefficient
+ *   мерекелер жоспарлы жұмыс күндеріне кірмейді
+ * Бұрынғы нұсқада үстеме екі рет төленетін (негізгі сомада да, үстеме сомада да).
+ */
 export default defineEventHandler(async (event) => {
-  requireRole(event, ['admin'])
+  const user = await requireRole(event, ['admin'])
   const body = await readBody(event)
-  const { month, year } = body
-
-  if (!month || !year) {
-    throw createError({ statusCode: 400, statusMessage: 'Ай мен жыл қажет' })
-  }
+  const { year, month, prefix } = parsePeriod(body?.year, body?.month)
 
   const [settings] = await db.select().from(salarySettings)
-  if (!settings) throw createError({ statusCode: 500, statusMessage: 'Айлық баптаулары табылмады' })
+  if (!settings) throw createError({ statusCode: 500, statusMessage: 'No settings', message: 'Айлық баптаулары табылмады' })
+  const stdMinutes = settings.standardHoursPerDay * 60
 
-  const monthPrefix = `${year}-${String(month).padStart(2, '0')}`
+  const allSchedules = await db.select().from(schedules)
+  const scheduleById = new Map(allSchedules.map(s => [s.id, s]))
   const activeEmployees = await db.select().from(employees).where(eq(employees.isActive, true))
+  const monthRecords = await db.select().from(attendance).where(like(attendance.date, `${prefix}-%`))
+  const { from, to } = monthRange(year, month)
+  const holidaySet = new Set((await loadHolidays(from, to)).keys())
 
+  const round2 = (n: number) => Math.round(n * 100) / 100
   const results = []
 
   for (const emp of activeEmployees) {
-    const records = await db.select().from(attendance)
-      .where(and(eq(attendance.employeeId, emp.id), like(attendance.date, `${monthPrefix}%`)))
+    const schedule = emp.scheduleId ? scheduleById.get(emp.scheduleId) : undefined
+    const workDays = parseWorkDays(schedule?.workDays)
+    const plannedDays = plannedWorkDates(year, month, workDays, undefined, holidaySet).length
+    const hourlyRate = emp.salaryRate > 0 && plannedDays > 0 ? emp.salaryRate / (plannedDays * settings.standardHoursPerDay) : 0
 
-    let totalWorkMinutes = 0
-    let totalOvertimeMinutes = 0
-    let workDays = 0
+    let regularMin = 0
+    let overtimeMin = 0
+    let weekendMin = 0
+    let daysWorked = 0
 
-    for (const r of records) {
-      if (r.checkIn && r.checkOut) {
-        const [inH, inM] = r.checkIn.split(':').map(Number)
-        const [outH, outM] = r.checkOut.split(':').map(Number)
-        const worked = (outH * 60 + outM) - (inH * 60 + inM)
-        if (worked > 0) {
-          totalWorkMinutes += worked
-          workDays++
-        }
+    for (const r of monthRecords) {
+      if (r.employeeId !== emp.id || !r.checkIn || !r.checkOut) continue
+      const worked = workedMinutes(r.checkIn, r.checkOut)
+      if (worked <= 0) continue
+      daysWorked++
+      if (!workDays.includes(weekdayOf(r.date)) || holidaySet.has(r.date)) {
+        weekendMin += worked
+        continue
       }
-      totalOvertimeMinutes += r.overtimeMinutes
+      const overtime = Math.min(r.overtimeMinutes, worked)
+      overtimeMin += overtime
+      regularMin += Math.min(worked - overtime, stdMinutes)
     }
 
-    const workHours = totalWorkMinutes / 60
-    const overtimeHours = totalOvertimeMinutes / 60
-    const hourlyRate = emp.salaryRate > 0 ? emp.salaryRate / (settings.standardHoursPerDay * 22) : 0
-    const baseAmount = workHours * hourlyRate
-    const overtimeAmount = overtimeHours * hourlyRate * settings.overtimeCoefficient
-    const totalAmount = baseAmount + overtimeAmount
-
-    // Upsert payroll record
-    const [existing] = await db.select().from(payroll)
-      .where(and(eq(payroll.employeeId, emp.id), eq(payroll.month, month), eq(payroll.year, year)))
+    const regularHours = regularMin / 60
+    const overtimeHours = overtimeMin / 60
+    const weekendHours = weekendMin / 60
+    const baseAmount = Math.round(regularHours * hourlyRate)
+    const overtimeAmount = Math.round(overtimeHours * hourlyRate * settings.overtimeCoefficient)
+    const weekendAmount = Math.round(weekendHours * hourlyRate * settings.weekendCoefficient)
 
     const payrollData = {
       employeeId: emp.id,
       month,
       year,
-      workDays,
-      workHours: Math.round(workHours * 100) / 100,
-      overtimeHours: Math.round(overtimeHours * 100) / 100,
-      baseAmount: Math.round(baseAmount),
-      overtimeAmount: Math.round(overtimeAmount),
+      workDays: daysWorked,
+      plannedDays,
+      workHours: round2(regularHours + overtimeHours + weekendHours),
+      regularHours: round2(regularHours),
+      overtimeHours: round2(overtimeHours),
+      weekendHours: round2(weekendHours),
+      baseAmount,
+      overtimeAmount,
+      weekendAmount,
       deductions: 0,
-      totalAmount: Math.round(totalAmount),
+      totalAmount: baseAmount + overtimeAmount + weekendAmount,
     }
 
+    const [existing] = await db.select({ id: payroll.id }).from(payroll)
+      .where(and(eq(payroll.employeeId, emp.id), eq(payroll.month, month), eq(payroll.year, year)))
     if (existing) {
       await db.update(payroll).set(payrollData).where(eq(payroll.id, existing.id))
     } else {
@@ -74,5 +95,6 @@ export default defineEventHandler(async (event) => {
     results.push({ ...payrollData, employeeName: emp.name })
   }
 
-  return { month: monthPrefix, results }
+  await audit(user.id, 'payroll_calculated', { period: prefix, employees: results.length })
+  return { month: prefix, results }
 })

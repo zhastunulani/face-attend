@@ -1,131 +1,156 @@
 import { db } from '~/server/db'
-import { attendance, employees, schedules } from '~/server/db/schema'
-import { eq, and } from 'drizzle-orm'
+import { attendance, schedules, salarySettings, kiosks } from '~/server/db/schema'
+import { eq, and, isNull } from 'drizzle-orm'
+import { getKiosk, getAuthUser } from '~/server/utils/auth'
+import { parseDescriptor, matchFace } from '~/server/utils/face'
+import { saveImage } from '~/server/utils/files'
+import { audit, hitRateLimit, clientIp } from '~/server/utils/audit'
+import { localNow, addDays, workedMinutes, lateMinutesFor, overtimeMinutesFor } from '~/server/utils/time'
+
+const MIN_WORK_MINUTES = 30
+const MAX_SHIFT_MINUTES = 18 * 60 // түнгі ауысымды кешегі күнге жатқызу шегі
+
+const fail = (statusCode: number, message: string) =>
+  createError({ statusCode, statusMessage: 'Check-in rejected', message })
 
 export default defineEventHandler(async (event) => {
+  // 1. Кім жазып жатыр: тіркелген киоск немесе admin/head
+  const kiosk = await getKiosk(event)
+  const user = kiosk ? null : await getAuthUser(event)
+  if (!kiosk && !(user && !user.mustChangePassword && (user.role === 'admin' || user.role === 'head'))) {
+    throw fail(401, 'Бұл құрылғы киоск ретінде тіркелмеген')
+  }
+  const source = kiosk ? `kiosk:${kiosk.id}` : `user:${user!.id}`
+  const actorId = kiosk ? kiosk.createdBy : user!.id
+
+  if (hitRateLimit(`checkin:${source}:${clientIp(event)}`, 30, 60_000)) {
+    throw fail(429, 'Тым жиі сұраныс. Біраз күтіңіз')
+  }
+
+  // 2. Дене валидациясы
   const body = await readBody(event)
-  const { employeeId, type, photo } = body
+  // Киосктың режимі (кіреберіс/шығу есігі) клиент жіберген түрден басым
+  const type = kiosk && kiosk.mode !== 'auto' ? kiosk.mode : body?.type
+  if (!['in', 'out', 'auto'].includes(type)) throw fail(400, 'type "in", "out" немесе "auto" болуы керек')
+  const rawList = Array.isArray(body?.descriptors) ? body.descriptors : []
+  if (rawList.length < 1 || rawList.length > 5) throw fail(400, '1–5 бет дескрипторы қажет')
+  const descriptors = rawList.map(parseDescriptor)
+  if (descriptors.some((d: number[] | null) => !d)) throw fail(400, 'Дескриптор форматы қате (128 сан)')
 
-  if (!employeeId || !type) {
-    throw createError({ statusCode: 400, statusMessage: 'employee_id және type қажет' })
+  // 3. Бетті серверде салыстыру (клиент employeeId жібермейді)
+  const match = await matchFace(descriptors as number[][])
+  if (!match.ok) {
+    await audit(actorId, 'checkin_rejected', { source, reason: match.reason })
+    const msg = match.reason === 'ambiguous'
+      ? 'Бет сенімді анықталмады. Камераға тура қарап, қайталаңыз'
+      : 'Жүйеде тіркелген қызметкер табылмады'
+    throw fail(404, msg)
+  }
+  const employee = match.employee
+
+  // Head тек өз бөлімінің қызметкерлерін тіркей алады
+  if (user?.role === 'head' && employee.departmentId !== user.departmentId) {
+    throw fail(403, 'Бұл қызметкер сіздің бөліміңізде емес')
   }
 
-  const [employee] = await db.select().from(employees).where(eq(employees.id, employeeId))
-  if (!employee || !employee.isActive) {
-    throw createError({ statusCode: 404, statusMessage: 'Қызметкер табылмады' })
-  }
+  const now = localNow()
+  const [schedule] = employee.scheduleId
+    ? await db.select().from(schedules).where(eq(schedules.id, employee.scheduleId))
+    : [null]
+  const [settings] = await db.select().from(salarySettings)
+  const stdHours = settings?.standardHoursPerDay ?? 8
 
-  const now = new Date()
-  const date = now.toISOString().split('T')[0]
-  const time = now.toTimeString().split(' ')[0] // HH:MM:SS
+  // 4. Ашық жазбаны табу: бүгінгі, немесе кешегі аяқталмаған (түнгі ауысым)
+  const findRecord = async (date: string) =>
+    (await db.select().from(attendance).where(and(eq(attendance.employeeId, employee.id), eq(attendance.date, date))))[0]
 
-  // Save photo
-  let photoPath: string | null = null
-  if (photo) {
-    const { writeFileSync, existsSync, mkdirSync } = await import('fs')
-    const { resolve } = await import('path')
-    const uploadsDir = resolve(process.cwd(), 'public/uploads/checkins')
-    if (!existsSync(uploadsDir)) mkdirSync(uploadsDir, { recursive: true })
-    const filename = `checkin_${employeeId}_${Date.now()}.jpg`
-    const base64Data = photo.replace(/^data:image\/\w+;base64,/, '')
-    writeFileSync(resolve(uploadsDir, filename), Buffer.from(base64Data, 'base64'))
-    photoPath = `/uploads/checkins/${filename}`
-  }
-
-  // Check existing record for today
-  const [existing] = await db.select().from(attendance)
-    .where(and(eq(attendance.employeeId, employeeId), eq(attendance.date, date)))
-
-  // Check-in
-  if (type === 'in') {
-    if (existing?.checkIn) {
-      return { success: false, message: 'Бүгін check-in жазылған', time: existing.checkIn }
+  const today = await findRecord(now.date)
+  let open = today?.checkIn && !today.checkOut ? today : undefined
+  if (!today?.checkIn) {
+    const yesterday = await findRecord(addDays(now.date, -1))
+    if (yesterday?.checkIn && !yesterday.checkOut && workedMinutes(yesterday.checkIn, now.time) <= MAX_SHIFT_MINUTES
+      && workedMinutes(yesterday.checkIn, now.time) > 0 && now.minutes < 12 * 60) {
+      open = yesterday
     }
+  }
 
-    // Calculate lateness
-    let isLate = false
-    let lateMinutes = 0
-    if (employee.scheduleId) {
-      const [schedule] = await db.select().from(schedules).where(eq(schedules.id, employee.scheduleId))
-      if (schedule) {
-        const [schedH, schedM] = schedule.workStart.split(':').map(Number)
-        const [nowH, nowM] = time.split(':').map(Number)
-        const schedMin = schedH * 60 + schedM
-        const nowMin = nowH * 60 + nowM
-        if (nowMin > schedMin) {
-          isLate = true
-          lateMinutes = nowMin - schedMin
-        }
+  const action: 'in' | 'out' = type === 'auto' ? (open ? 'out' : 'in') : type
+  if (type === 'auto' && open && workedMinutes(open.checkIn!, now.time) < MIN_WORK_MINUTES) {
+    return { success: false, employeeName: employee.name, message: `${employee.name}: келу ${open.checkIn!.slice(0, 5)} тіркелген`, time: open.checkIn }
+  }
+
+  const photoPath = body.photo ? await saveImage(body.photo, 'checkin') : null
+  if (kiosk) await db.update(kiosks).set({ lastSeenAt: new Date().toISOString() }).where(eq(kiosks.id, kiosk.id))
+
+  // 5. Келу
+  if (action === 'in') {
+    if (today?.checkIn) {
+      return { success: false, employeeName: employee.name, message: 'Бүгін келу тіркелген', time: today.checkIn }
+    }
+    if (open) {
+      return { success: false, employeeName: employee.name, message: 'Алдыңғы ауысымнан кету тіркелмеген', time: open.checkIn }
+    }
+    const lateMinutes = lateMinutesFor(now.minutes, schedule)
+    const values = {
+      checkIn: now.time,
+      checkInPhoto: photoPath,
+      isLate: lateMinutes > 0,
+      lateMinutes,
+      status: 'present',
+      source,
+      matchDistance: match.distance,
+    }
+    if (today) {
+      // Мысалы, бұрын 'absent' деп белгіленген жазба
+      await db.update(attendance).set(values).where(and(eq(attendance.id, today.id), isNull(attendance.checkIn)))
+    } else {
+      const inserted = await db.insert(attendance).values({ employeeId: employee.id, date: now.date, ...values })
+        .onConflictDoNothing().returning()
+      if (!inserted.length) {
+        return { success: false, employeeName: employee.name, message: 'Бүгін келу тіркелген' }
       }
     }
-
-    if (existing) {
-      await db.update(attendance).set({
-        checkIn: time, checkInPhoto: photoPath, isLate, lateMinutes, status: 'present',
-      }).where(eq(attendance.id, existing.id))
-    } else {
-      await db.insert(attendance).values({
-        employeeId, date, checkIn: time, checkInPhoto: photoPath, isLate, lateMinutes, status: 'present',
-      })
-    }
+    await audit(actorId, 'checkin', { source, employeeId: employee.id, distance: Number(match.distance.toFixed(3)) })
 
     return {
       success: true,
       employeeName: employee.name,
       type: 'in',
-      time,
-      isLate,
+      time: now.time,
+      isLate: lateMinutes > 0,
       lateMinutes,
-      message: isLate ? `${employee.name} — кешігу: ${lateMinutes} мин` : `${employee.name} — келді`,
+      message: lateMinutes > 0 ? `${employee.name} — кешігу: ${lateMinutes} мин` : `${employee.name} — келді`,
     }
   }
 
-  // Check-out
-  if (type === 'out') {
-    if (!existing?.checkIn) {
-      throw createError({ statusCode: 400, statusMessage: 'Алдымен check-in жасаңыз' })
+  // 6. Кету
+  if (!open) {
+    if (today?.checkOut) {
+      return { success: false, employeeName: employee.name, message: 'Бүгін кету тіркелген', time: today.checkOut }
     }
-    if (existing.checkOut) {
-      return { success: false, message: 'Бүгін check-out жазылған', time: existing.checkOut }
-    }
-
-    // 30-minute minimum check
-    const [inH, inM] = existing.checkIn.split(':').map(Number)
-    const [outH, outM] = time.split(':').map(Number)
-    const workedMin = (outH * 60 + outM) - (inH * 60 + inM)
-    if (workedMin < 30 && workedMin >= 0) {
-      throw createError({ statusCode: 400, statusMessage: 'Check-in мен check-out арасы кемінде 30 минут болуы керек' })
-    }
-
-    // Calculate overtime
-    let overtimeMinutes = 0
-    if (employee.scheduleId) {
-      const [schedule] = await db.select().from(schedules).where(eq(schedules.id, employee.scheduleId))
-      if (schedule) {
-        const [endH, endM] = schedule.workEnd.split(':').map(Number)
-        const schedEndMin = endH * 60 + endM
-        const outMin = outH * 60 + outM
-        if (outMin > schedEndMin) {
-          overtimeMinutes = outMin - schedEndMin
-        }
-      }
-    }
-
-    await db.update(attendance).set({
-      checkOut: time, checkOutPhoto: photoPath, overtimeMinutes,
-    }).where(eq(attendance.id, existing.id))
-
-    return {
-      success: true,
-      employeeName: employee.name,
-      type: 'out',
-      time,
-      overtimeMinutes,
-      message: overtimeMinutes > 0
-        ? `${employee.name} — кетті (переработка: ${overtimeMinutes} мин)`
-        : `${employee.name} — кетті`,
-    }
+    throw fail(400, 'Алдымен келуді тіркеңіз')
   }
+  const worked = workedMinutes(open.checkIn!, now.time)
+  if (worked < MIN_WORK_MINUTES) {
+    throw fail(400, `Келу мен кету арасы кемінде ${MIN_WORK_MINUTES} минут болуы керек`)
+  }
+  const overtimeMinutes = overtimeMinutesFor(open.checkIn!, now.time, schedule, stdHours)
 
-  throw createError({ statusCode: 400, statusMessage: 'type "in" немесе "out" болуы керек' })
+  const updated = await db.update(attendance).set({ checkOut: now.time, checkOutPhoto: photoPath, overtimeMinutes })
+    .where(and(eq(attendance.id, open.id), isNull(attendance.checkOut))).returning()
+  if (!updated.length) {
+    return { success: false, employeeName: employee.name, message: 'Кету тіркелген' }
+  }
+  await audit(actorId, 'checkout', { source, employeeId: employee.id, distance: Number(match.distance.toFixed(3)) })
+
+  return {
+    success: true,
+    employeeName: employee.name,
+    type: 'out',
+    time: now.time,
+    overtimeMinutes,
+    message: overtimeMinutes > 0
+      ? `${employee.name} — кетті (үстеме: ${overtimeMinutes} мин)`
+      : `${employee.name} — кетті`,
+  }
 })

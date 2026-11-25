@@ -1,68 +1,40 @@
-import { db } from '~/server/db'
-import { attendance, employees, departments } from '~/server/db/schema'
-import { eq, like } from 'drizzle-orm'
-import { requireAuth } from '~/server/utils/auth'
+import { requireAuth, departmentScope } from '~/server/utils/auth'
+import { parsePeriod, monthAttendance } from '~/server/utils/period'
+import { workedMinutes } from '~/server/utils/time'
 
 export default defineEventHandler(async (event) => {
-  requireAuth(event)
+  const user = await requireAuth(event)
   const query = getQuery(event)
-  const { year, month } = query
+  const { year, month, prefix: monthPrefix } = parsePeriod(query.year, query.month)
 
-  if (!year || !month) {
-    throw createError({ statusCode: 400, statusMessage: 'Жыл мен ай қажет' })
-  }
-
-  const monthPrefix = `${year}-${String(month).padStart(2, '0')}`
-
-  const records = await db.select({
-    employeeId: attendance.employeeId,
-    employeeName: employees.name,
-    departmentName: departments.name,
-    date: attendance.date,
-    checkIn: attendance.checkIn,
-    checkOut: attendance.checkOut,
-    isLate: attendance.isLate,
-    lateMinutes: attendance.lateMinutes,
-    overtimeMinutes: attendance.overtimeMinutes,
-    status: attendance.status,
-  })
-    .from(attendance)
-    .innerJoin(employees, eq(attendance.employeeId, employees.id))
-    .leftJoin(departments, eq(employees.departmentId, departments.id))
-    .where(like(attendance.date, `${monthPrefix}%`))
+  const records = await monthAttendance(monthPrefix, departmentScope(user))
 
   // Group by employee
   const grouped: Record<number, any> = {}
   for (const r of records) {
-    if (!grouped[r.employeeId]) {
-      grouped[r.employeeId] = {
-        employeeName: r.employeeName,
-        departmentName: r.departmentName || '-',
-        workDays: 0,
-        lateDays: 0,
-        totalLateMinutes: 0,
-        absentDays: 0,
-        totalWorkMinutes: 0,
-        totalOvertimeMinutes: 0,
-      }
+    const g = grouped[r.employeeId] ??= {
+      employeeName: r.employeeName,
+      departmentName: r.departmentName || '-',
+      workDays: 0,
+      lateDays: 0,
+      totalLateMinutes: 0,
+      totalWorkMinutes: 0,
+      totalOvertimeMinutes: 0,
     }
-    grouped[r.employeeId].workDays++
+    if (!r.checkIn) continue
+    g.workDays++
     if (r.isLate) {
-      grouped[r.employeeId].lateDays++
-      grouped[r.employeeId].totalLateMinutes += r.lateMinutes
+      g.lateDays++
+      g.totalLateMinutes += r.lateMinutes
     }
-    grouped[r.employeeId].totalOvertimeMinutes += r.overtimeMinutes
-    if (r.checkIn && r.checkOut) {
-      const [inH, inM] = r.checkIn.split(':').map(Number)
-      const [outH, outM] = r.checkOut.split(':').map(Number)
-      grouped[r.employeeId].totalWorkMinutes += (outH * 60 + outM) - (inH * 60 + inM)
-    }
+    g.totalOvertimeMinutes += r.overtimeMinutes
+    if (r.checkOut) g.totalWorkMinutes += workedMinutes(r.checkIn, r.checkOut)
   }
 
   // Build Excel XML (SpreadsheetML - opens in Excel, Google Sheets, etc.)
   const rows = Object.values(grouped)
   const monthNames = ['', 'Қаңтар', 'Ақпан', 'Наурыз', 'Сәуір', 'Мамыр', 'Маусым', 'Шілде', 'Тамыз', 'Қыркүйек', 'Қазан', 'Қараша', 'Желтоқсан']
-  const title = `Табель - ${monthNames[Number(month)]} ${year}`
+  const title = `Табель - ${monthNames[month]} ${year}`
 
   let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <?mso-application progid="Excel.Sheet"?>
@@ -136,5 +108,5 @@ export default defineEventHandler(async (event) => {
 })
 
 function escapeXml(str: string): string {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;')
 }

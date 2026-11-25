@@ -4,7 +4,7 @@ import { eq } from 'drizzle-orm'
 import { requireAuth } from '~/server/utils/auth'
 
 export default defineEventHandler(async (event) => {
-  requireAuth(event)
+  await requireAuth(event)
 
   return await db.select({
     id: kpiTargets.id,

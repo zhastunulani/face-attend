@@ -1,29 +1,20 @@
 import { db } from '~/server/db'
-import { employees, departments, positions } from '~/server/db/schema'
-import { eq } from 'drizzle-orm'
-import { getAuthUser } from '~/server/utils/auth'
+import { employees } from '~/server/db/schema'
+import { eq, and, sql, type SQL } from 'drizzle-orm'
+import { requireAuth, departmentScope } from '~/server/utils/auth'
 
+// Бет дескрипторлары (биометрия) енді ешқашан клиентке берілмейді — тек hasFace белгісі.
 export default defineEventHandler(async (event) => {
+  const user = await requireAuth(event)
   const query = getQuery(event)
-  const withFace = query.withFace === 'true'
   const activeOnly = query.active !== 'false'
 
-  // Public endpoint for face scanning (no auth needed)
-  if (withFace) {
-    const result = await db.select({
-      id: employees.id,
-      name: employees.name,
-      faceDescriptor: employees.faceDescriptor,
-      departmentId: employees.departmentId,
-    }).from(employees).where(eq(employees.isActive, true))
-    return result.filter(e => e.faceDescriptor)
-  }
+  const conditions: SQL[] = []
+  const scope = departmentScope(user)
+  if (scope !== null) conditions.push(eq(employees.departmentId, scope))
+  if (activeOnly) conditions.push(eq(employees.isActive, true))
 
-  // Protected: full employee list
-  const user = getAuthUser(event)
-  if (!user) throw createError({ statusCode: 401, statusMessage: 'Авторизация қажет' })
-
-  let query_builder = db.select({
+  const rows = await db.select({
     id: employees.id,
     name: employees.name,
     departmentId: employees.departmentId,
@@ -34,16 +25,12 @@ export default defineEventHandler(async (event) => {
     vacationDaysLeft: employees.vacationDaysLeft,
     isActive: employees.isActive,
     createdAt: employees.createdAt,
-  }).from(employees)
+    hasFace: sql<boolean>`${employees.faceDescriptor} IS NOT NULL`,
+    // Эталон саны: ескі жазбаларда 1 кадр — қайта тіркеу ұсынылады
+    faceTemplates: sql<number>`CASE WHEN ${employees.faceDescriptor} IS NULL THEN 0 WHEN left(${employees.faceDescriptor}, 2) = '[[' THEN json_array_length(${employees.faceDescriptor}::json) ELSE 1 END`.mapWith(Number),
+  }).from(employees).where(conditions.length ? and(...conditions) : undefined).orderBy(employees.name)
 
-  // Head sees only their department
-  if (user.role === 'head' && user.departmentId) {
-    return await query_builder.where(eq(employees.departmentId, user.departmentId))
-  }
-
-  if (activeOnly) {
-    return await query_builder.where(eq(employees.isActive, true))
-  }
-
-  return await query_builder
+  // Жалақыны тек admin және head көреді
+  if (user.role === 'manager') return rows.map(r => ({ ...r, salaryRate: null }))
+  return rows
 })

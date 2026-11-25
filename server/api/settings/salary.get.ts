@@ -3,7 +3,7 @@ import { salarySettings } from '~/server/db/schema'
 import { requireAuth } from '~/server/utils/auth'
 
 export default defineEventHandler(async (event) => {
-  requireAuth(event)
+  await requireAuth(event)
   const [settings] = await db.select().from(salarySettings)
   return settings
 })

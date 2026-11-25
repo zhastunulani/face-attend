@@ -1,8 +1,8 @@
 <template>
-  <div class="max-w-4xl mx-auto px-4 py-6">
+  <div class="page !max-w-4xl">
     <div class="mb-6">
-      <h1 class="text-2xl font-bold text-gray-900">Баптаулар</h1>
-      <p class="text-gray-500 mt-1">Жүйе параметрлерін басқару</p>
+      <h1 class="page-title">Баптаулар</h1>
+      <p class="page-subtitle">Жүйе параметрлерін басқару</p>
     </div>
 
     <!-- User info -->
@@ -20,9 +20,9 @@
       </div>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div class="grid grid-cols-1 gap-6" :class="isAdmin ? 'md:grid-cols-2' : 'max-w-md'">
       <!-- Salary settings -->
-      <div class="card">
+      <div v-if="isAdmin" class="card">
         <h2 class="text-lg font-semibold mb-4">Жалақы параметрлері</h2>
         <div v-if="loadingSalary" class="text-center py-4 text-gray-400">Жүктелуде...</div>
         <form v-else @submit.prevent="saveSalarySettings" class="space-y-4">
@@ -70,26 +70,95 @@
       </div>
     </div>
 
+    <!-- Kiosks -->
+    <div v-if="isAdmin" class="card mt-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-lg font-semibold">Киоск құрылғылары</h2>
+        <NuxtLink to="/scan" class="text-sm text-primary-600 hover:underline">Осы құрылғыны тіркеу →</NuxtLink>
+      </div>
+      <p class="text-sm text-gray-500 mb-3">Сканерлеу тек осы тізімдегі белсенді құрылғылардан мүмкін. Құрылғы жоғалса — бұғаттаңыз.</p>
+      <div v-if="!kiosks.length" class="text-sm text-gray-400">Тіркелген киоск жоқ</div>
+      <ul v-else class="divide-y divide-gray-100">
+        <li v-for="k in kiosks" :key="k.id" class="py-2 flex items-center justify-between gap-3 text-sm">
+          <div>
+            <p class="font-medium" :class="k.isRevoked ? 'text-gray-400 line-through' : 'text-gray-900'">{{ k.name }} <span class="text-gray-400">#{{ k.id }}</span></p>
+            <p class="text-xs text-gray-400">Соңғы белсенділік: {{ k.lastSeenAt ? dateTimeText(new Date(k.lastSeenAt)) : '—' }}</p>
+          </div>
+          <div v-if="!k.isRevoked" class="flex items-center gap-3">
+            <select :value="k.mode" class="input w-36 py-1 text-sm" @change="setKioskMode(k.id, ($event.target as HTMLSelectElement).value)">
+              <option value="auto">Бір есік (авто)</option>
+              <option value="in">Тек кіру</option>
+              <option value="out">Тек шығу</option>
+            </select>
+            <button class="text-red-500 hover:text-red-700 font-medium" @click="revokeKiosk(k.id)">Бұғаттау</button>
+          </div>
+          <span v-else class="text-xs text-gray-400">Бұғатталған</span>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Holidays -->
+    <div v-if="isAdmin" class="card mt-6">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-lg font-semibold">Мерекелер</h2>
+        <div class="flex items-center gap-1">
+          <button class="btn-secondary !px-3 !py-1" aria-label="Алдыңғы жыл" @click="holidayYear--; fetchHolidays()">‹</button>
+          <span class="font-medium w-14 text-center">{{ holidayYear }}</span>
+          <button class="btn-secondary !px-3 !py-1" aria-label="Келесі жыл" @click="holidayYear++; fetchHolidays()">›</button>
+        </div>
+      </div>
+      <p class="text-sm text-gray-500 mb-4">
+        Мереке күндері жоспарлы жұмыс күніне кірмейді, ал бұл күнгі жұмыс демалыс коэффициентімен төленеді.
+        Құрбан айт пен Үкімет қаулысымен ауыстырылған демалыс күндерін қолмен қосыңыз.
+      </p>
+      <form class="flex flex-col sm:flex-row gap-2 mb-4" @submit.prevent="addHoliday">
+        <input v-model="newHoliday.date" type="date" class="input sm:w-44" required />
+        <input v-model="newHoliday.name" class="input" placeholder="Атауы, мысалы: Құрбан айт" required maxlength="100" />
+        <button type="submit" class="btn-primary whitespace-nowrap">Қосу</button>
+      </form>
+      <div v-if="!holidayList.length" class="text-sm text-gray-400">Бұл жылға мереке жоқ</div>
+      <ul v-else class="divide-y divide-gray-100">
+        <li v-for="h in holidayList" :key="h.date" class="py-2 flex items-center justify-between text-sm">
+          <span><span class="font-medium w-28 inline-block">{{ formatDay(h.date) }}</span> {{ h.name }}</span>
+          <button class="text-gray-400 hover:text-red-600" aria-label="Жою" @click="removeHoliday(h.date)">×</button>
+        </li>
+      </ul>
+    </div>
+
     <!-- Quick links -->
-    <div class="card mt-6">
+    <div v-if="isAdmin" class="card mt-6">
       <h2 class="text-lg font-semibold mb-4">Жылдам сілтемелер</h2>
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <NuxtLink to="/users" class="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors border border-gray-200">
+          <div class="w-10 h-10 bg-primary-50 text-primary-600 rounded-lg flex items-center justify-center"><AppIcon name="key" :size="20" /></div>
+          <div>
+            <p class="font-medium text-sm">Пайдаланушылар</p>
+            <p class="text-xs text-gray-400">Кіру құқықтары</p>
+          </div>
+        </NuxtLink>
+        <NuxtLink to="/audit" class="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors border border-gray-200">
+          <div class="w-10 h-10 bg-primary-50 text-primary-600 rounded-lg flex items-center justify-center"><AppIcon name="list" :size="20" /></div>
+          <div>
+            <p class="font-medium text-sm">Журнал</p>
+            <p class="text-xs text-gray-400">Кім не өзгертті</p>
+          </div>
+        </NuxtLink>
         <NuxtLink to="/departments" class="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors border border-gray-200">
-          <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center text-lg">🏢</div>
+          <div class="w-10 h-10 bg-primary-50 text-primary-600 rounded-lg flex items-center justify-center"><AppIcon name="building" :size="20" /></div>
           <div>
             <p class="font-medium text-sm">Бөлімдер</p>
             <p class="text-xs text-gray-400">Басқару</p>
           </div>
         </NuxtLink>
         <NuxtLink to="/positions" class="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors border border-gray-200">
-          <div class="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center text-lg">💼</div>
+          <div class="w-10 h-10 bg-primary-50 text-primary-600 rounded-lg flex items-center justify-center"><AppIcon name="briefcase" :size="20" /></div>
           <div>
             <p class="font-medium text-sm">Лауазымдар</p>
             <p class="text-xs text-gray-400">Басқару</p>
           </div>
         </NuxtLink>
         <NuxtLink to="/schedules" class="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 transition-colors border border-gray-200">
-          <div class="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center text-lg">🕐</div>
+          <div class="w-10 h-10 bg-primary-50 text-primary-600 rounded-lg flex items-center justify-center"><AppIcon name="clock" :size="20" /></div>
           <div>
             <p class="font-medium text-sm">Жұмыс кестелері</p>
             <p class="text-xs text-gray-400">Басқару</p>
@@ -101,6 +170,8 @@
 </template>
 
 <script setup lang="ts">
+const { user, isAdmin } = useAuth()
+const { notifyError } = useNotify()
 const userInfo = ref<any>(null)
 const loadingSalary = ref(true)
 const savingSalary = ref(false)
@@ -156,7 +227,7 @@ const saveSalarySettings = async () => {
     salarySuccess.value = true
     setTimeout(() => { salarySuccess.value = false }, 3000)
   } catch (e) {
-    console.error(e)
+    notifyError(e)
   } finally {
     savingSalary.value = false
   }
@@ -171,8 +242,8 @@ const changePassword = async () => {
     return
   }
 
-  if (passwordForm.newPassword.length < 6) {
-    passwordError.value = 'Құпия сөз кемінде 6 таңбадан тұруы керек'
+  if (passwordForm.newPassword.length < 8) {
+    passwordError.value = 'Құпия сөз кемінде 8 таңбадан тұруы керек'
     return
   }
 
@@ -186,17 +257,79 @@ const changePassword = async () => {
       },
     })
     passwordSuccess.value = true
+    if (user.value) user.value = { ...user.value, mustChangePassword: false }
     passwordForm.oldPassword = ''
     passwordForm.newPassword = ''
     passwordForm.confirmPassword = ''
     setTimeout(() => { passwordSuccess.value = false }, 3000)
   } catch (e: any) {
-    passwordError.value = e.data?.statusMessage || 'Құпия сөзді өзгерту кезінде қате пайда болды'
+    passwordError.value = e.data?.message || e.data?.statusMessage || 'Құпия сөзді өзгерту кезінде қате пайда болды'
   } finally {
     savingPassword.value = false
   }
 }
 
-fetchUserInfo()
-fetchSalarySettings()
+const holidayYear = ref(new Date().getFullYear())
+const holidayList = ref<{ date: string; name: string }[]>([])
+const newHoliday = reactive({ date: '', name: '' })
+const fetchHolidays = async () => {
+  try {
+    holidayList.value = await $fetch<{ date: string; name: string }[]>('/api/holidays', { query: { year: holidayYear.value } })
+  } catch (e) {
+    notifyError(e)
+  }
+}
+const addHoliday = async () => {
+  try {
+    await $fetch('/api/holidays', { method: 'POST', body: { ...newHoliday } })
+    holidayYear.value = Number(newHoliday.date.slice(0, 4))
+    newHoliday.date = ''
+    newHoliday.name = ''
+    await fetchHolidays()
+  } catch (e) {
+    notifyError(e)
+  }
+}
+const removeHoliday = async (date: string) => {
+  try {
+    await $fetch(`/api/holidays/${date}`, { method: 'DELETE' })
+    await fetchHolidays()
+  } catch (e) {
+    notifyError(e)
+  }
+}
+
+const kiosks = ref<any[]>([])
+const fetchKiosks = async () => {
+  try {
+    kiosks.value = await $fetch<any[]>('/api/kiosk')
+  } catch (e) {
+    notifyError(e)
+  }
+}
+const setKioskMode = async (id: number, mode: string) => {
+  try {
+    await $fetch(`/api/kiosk/${id}`, { method: 'PUT', body: { mode } })
+    await fetchKiosks()
+  } catch (e) {
+    notifyError(e)
+  }
+}
+const revokeKiosk = async (id: number) => {
+  try {
+    await $fetch(`/api/kiosk/${id}`, { method: 'DELETE' })
+    await fetchKiosks()
+  } catch (e) {
+    notifyError(e)
+  }
+}
+
+onMounted(() => {
+  fetchUserInfo()
+  if (isAdmin.value) {
+    fetchSalarySettings()
+    fetchKiosks()
+    fetchHolidays()
+  }
+})
 </script>

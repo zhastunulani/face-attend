@@ -1,15 +1,17 @@
 <template>
-  <div class="min-h-screen bg-gray-50">
+  <div class="min-h-screen bg-gray-100">
     <!-- Top bar -->
-    <div class="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between sticky top-0 z-30">
-      <NuxtLink to="/" class="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
-        </svg>
-        <span class="text-sm font-medium">Артқа</span>
-      </NuxtLink>
-      <h1 class="text-lg font-bold text-gray-900">Сканерлеу</h1>
-      <div class="w-16"></div>
+    <div class="bg-navy text-white px-4 sm:px-6 h-16 flex items-center justify-between sticky top-0 z-30">
+      <div class="flex items-center gap-3">
+        <NuxtLink v-if="!kiosk" to="/" class="p-2 -ml-2 rounded-lg text-white/70 hover:text-white hover:bg-white/10" aria-label="Артқа">
+          <AppIcon name="chevron-left" />
+        </NuxtLink>
+        <AppLogo dark :size="30" />
+      </div>
+      <div class="text-right leading-tight">
+        <p class="text-2xl font-semibold tabular-nums tracking-tight">{{ clock }}</p>
+        <p class="text-xs text-white/60">{{ todayLabel }}</p>
+      </div>
     </div>
 
     <div class="max-w-2xl mx-auto px-4 py-6 space-y-4">
@@ -23,28 +25,55 @@
           <span class="text-sm font-medium" :class="faceDetected ? 'text-green-600' : 'text-gray-400'">
             {{ faceDetected ? 'Бет анықталды' : 'Бет табылмады' }}
           </span>
+          <span v-if="kiosk" class="text-xs text-gray-400">· {{ kiosk.name }} · {{ modeLabel }}</span>
         </div>
         <button
+          v-if="!kiosk"
           @click="autoScan = !autoScan"
           class="text-sm px-3 py-1.5 rounded-lg font-medium transition-colors"
           :class="autoScan
             ? 'bg-primary-100 text-primary-700 hover:bg-primary-200'
             : 'bg-gray-100 text-gray-500 hover:bg-gray-200'"
         >
-          {{ autoScan ? `Авто-сканер (${autoCountdown}с)` : 'Авто-сканер' }}
+          {{ autoScan ? 'Авто-сканер: қосулы' : 'Авто-сканер' }}
         </button>
       </div>
 
+      <!-- Kiosk not activated -->
+      <div v-if="kioskChecked && !canScan" class="rounded-2xl p-5 bg-yellow-50 border border-yellow-200 text-sm text-yellow-800 space-y-2">
+        <p class="font-semibold">Бұл құрылғы киоск ретінде тіркелмеген</p>
+        <p>Сканерлеу тек тіркелген құрылғыдан мүмкін. Әкімші немесе бөлім басшысы осы құрылғыда жүйеге кіріп, киоскіні белсендіруі керек.</p>
+        <NuxtLink to="/login" class="inline-block text-primary-600 font-medium hover:underline">Жүйеге кіру →</NuxtLink>
+      </div>
+      <div v-else-if="kioskChecked && !kiosk && canActivate" class="rounded-xl p-4 bg-white border border-primary-200 shadow-card text-sm space-y-3">
+        <div class="flex items-start gap-3">
+          <span class="w-9 h-9 rounded-lg bg-primary-50 text-primary-600 flex items-center justify-center shrink-0"><AppIcon name="door-open" :size="18" /></span>
+          <div>
+            <p class="font-medium text-navy">Осы құрылғыны киоск ету</p>
+            <p class="text-ink-muted">Қазір сіз өз аккаунтыңызбен сканерлеп жатырсыз. Есік алдындағы планшет/телефон үшін киоск ретінде тіркеңіз.</p>
+          </div>
+        </div>
+        <div class="flex flex-col sm:flex-row gap-2">
+        <input v-model="kioskName" class="input sm:flex-1" placeholder="Киоск атауы" />
+        <select v-model="kioskMode" class="input sm:w-40">
+          <option value="auto">Бір есік (авто)</option>
+          <option value="in">Тек кіру</option>
+          <option value="out">Тек шығу</option>
+        </select>
+        <button class="btn-primary" :disabled="activating" @click="activateKiosk">Киоск ету</button>
+        </div>
+      </div>
+
       <!-- Camera feed -->
-      <div class="relative rounded-2xl overflow-hidden bg-black shadow-lg aspect-[4/3]">
+      <div v-if="canScan" class="relative rounded-2xl overflow-hidden bg-black shadow-lg aspect-[4/3]">
         <video
           ref="videoRef"
           autoplay
           playsinline
           muted
-          class="w-full h-full object-cover"
+          class="w-full h-full object-cover -scale-x-100"
         />
-        <canvas ref="canvasRef" class="absolute inset-0 w-full h-full" />
+        <canvas ref="canvasRef" class="absolute inset-0 w-full h-full -scale-x-100" />
 
         <!-- Loading overlay -->
         <div
@@ -53,6 +82,15 @@
         >
           <div class="w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin" />
           <p class="text-sm">{{ loadingMessage }}</p>
+        </div>
+
+        <!-- Liveness hint -->
+        <div
+          v-if="modelsLoaded && cameraReady && faceDetected && !processing"
+          class="absolute bottom-3 left-3 right-3 rounded-xl px-3 py-2 text-sm font-medium text-center"
+          :class="livenessPassed ? 'bg-green-500/90 text-white' : 'bg-black/60 text-white'"
+        >
+          {{ livenessHint }}
         </div>
 
         <!-- Processing overlay -->
@@ -65,11 +103,16 @@
         </div>
       </div>
 
-      <!-- Action buttons -->
-      <div class="grid grid-cols-2 gap-3">
+      <!-- Kiosk: қолсыз режим — кнопкалар жоқ -->
+      <p v-if="kiosk && !result" class="text-center text-gray-500 text-sm">
+        Камераға қарап, басыңызды сәл бұрыңыз — белгі өзі жазылады
+      </p>
+
+      <!-- Action buttons (әкімші өз аккаунтымен сканерлегенде) -->
+      <div v-if="canScan && !kiosk" class="grid grid-cols-2 gap-3">
         <button
           @click="handleScan('in')"
-          :disabled="!faceDetected || processing || !modelsLoaded"
+          :disabled="!canSubmit"
           class="py-3 px-4 rounded-xl font-semibold text-white transition-all duration-200
             bg-green-500 hover:bg-green-600 active:scale-[0.97]
             disabled:bg-gray-300 disabled:cursor-not-allowed disabled:active:scale-100"
@@ -78,7 +121,7 @@
         </button>
         <button
           @click="handleScan('out')"
-          :disabled="!faceDetected || processing || !modelsLoaded"
+          :disabled="!canSubmit"
           class="py-3 px-4 rounded-xl font-semibold text-white transition-all duration-200
             bg-orange-500 hover:bg-orange-600 active:scale-[0.97]
             disabled:bg-gray-300 disabled:cursor-not-allowed disabled:active:scale-100"
@@ -96,19 +139,19 @@
         leave-from-class="opacity-100 translate-y-0"
         leave-to-class="opacity-0 translate-y-4"
       >
-        <div v-if="result" class="rounded-2xl p-5 shadow-md border" :class="result.success ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'">
+        <div v-if="result" class="rounded-2xl p-5 shadow-pop border-l-4 bg-white" :class="result.success ? 'border-status-ok' : 'border-status-danger'">
           <div class="flex items-start gap-4">
             <div
-              class="w-12 h-12 rounded-full flex items-center justify-center text-xl font-bold shrink-0"
-              :class="result.success ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'"
+              class="w-14 h-14 rounded-full flex items-center justify-center text-2xl font-semibold shrink-0"
+              :class="result.success ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'"
             >
               {{ result.success ? result.employeeName?.charAt(0) || '?' : '!' }}
             </div>
             <div class="flex-1 min-w-0">
-              <p class="font-semibold text-gray-900 truncate">
+              <p class="font-semibold text-gray-900 truncate" :class="kiosk ? 'text-2xl' : ''">
                 {{ result.success ? result.employeeName : 'Қате' }}
               </p>
-              <p class="text-sm text-gray-500 mt-0.5">
+              <p class="text-gray-500 mt-0.5" :class="kiosk ? 'text-lg' : 'text-sm'">
                 {{ result.message }}
               </p>
               <div v-if="result.success" class="flex flex-wrap gap-2 mt-2">
@@ -153,7 +196,6 @@ const cameraReady = ref(false)
 const faceDetected = ref(false)
 const processing = ref(false)
 const autoScan = ref(false)
-const autoCountdown = ref(5)
 const errorMsg = ref('')
 const loadingMessage = ref('Модельдер жүктелуде...')
 
@@ -168,33 +210,129 @@ const result = ref<{
   overtimeMinutes?: number
 } | null>(null)
 
-// Employee face data
-const employees = ref<Array<{
-  id: number
-  name: string
-  descriptor: Float32Array
-}>>([])
+// ==================== Сағат ====================
 
-let currentDescriptor: Float32Array | null = null
-let matchedEmployee: { id: number; name: string } | null = null
-let detectionInterval: ReturnType<typeof setInterval> | null = null
-let autoScanInterval: ReturnType<typeof setInterval> | null = null
-
-// Compute loading message
-const updateLoadingMessage = (msg: string) => {
-  loadingMessage.value = msg
+const clock = ref('')
+const todayLabel = ref('')
+let clockTimer: ReturnType<typeof setInterval> | null = null
+const tick = () => {
+  const d = new Date()
+  clock.value = clockText(d)
+  todayLabel.value = longDateText(d)
 }
 
-// Load face-api models
+// ==================== Kiosk ====================
+
+const kiosk = ref<{ id: number; name: string; mode: 'auto' | 'in' | 'out' } | null>(null)
+const kioskMode = ref<'auto' | 'in' | 'out'>('auto')
+const modeLabel = computed(() => ({ auto: 'кіру/шығу', in: 'кіру', out: 'шығу' })[kiosk.value?.mode ?? 'auto'])
+const canActivate = ref(false)
+const kioskChecked = ref(false)
+const kioskName = ref('Кіреберіс')
+const activating = ref(false)
+const canScan = computed(() => !!kiosk.value || canActivate.value)
+
+const loadKioskStatus = async () => {
+  try {
+    const data = await $fetch<{ kiosk: { id: number; name: string; mode: 'auto' | 'in' | 'out' } | null; canActivate: boolean }>('/api/kiosk/status')
+    kiosk.value = data.kiosk
+    canActivate.value = data.canActivate
+  } catch {
+    kiosk.value = null
+  } finally {
+    kioskChecked.value = true
+  }
+}
+
+const activateKiosk = async () => {
+  activating.value = true
+  try {
+    kiosk.value = await $fetch<{ id: number; name: string; mode: 'auto' | 'in' | 'out' }>('/api/kiosk/activate', { method: 'POST', body: { name: kioskName.value, mode: kioskMode.value } })
+    requestWakeLock()
+  } catch (e: any) {
+    errorMsg.value = e.data?.message || 'Киоскіні белсендіру мүмкін болмады'
+  } finally {
+    activating.value = false
+  }
+}
+
+// ==================== Liveness (басты бұру) ====================
+// Тегіс фотоны бұрғанда бет пропорциялары өзгермейді, ал тірі адам басын бұрғанда
+// мұрын көз сызығына қатысты жылжиды. Реттілік: тура -> бүйірге -> тура.
+
+type LivenessStage = 'front1' | 'turn' | 'front2' | 'passed'
+const stage = ref<LivenessStage>('front1')
+let passedAt = 0
+let frontalDescriptors: Float32Array[] = []
+const LIVENESS_TTL_MS = 5000
+const MULTI_FACE_MSG = 'Кадрда тек бір адам болуы керек'
+
+const livenessPassed = computed(() => stage.value === 'passed')
+const livenessHint = computed(() => {
+  switch (stage.value) {
+    case 'front1': return 'Камераға тура қараңыз'
+    case 'turn': return 'Басыңызды сәл оңға немесе солға бұрыңыз'
+    case 'front2': return 'Енді қайтадан тура қараңыз'
+    default: return 'Дайын — тіркеуге болады'
+  }
+})
+
+const resetLiveness = () => {
+  stage.value = 'front1'
+  frontalDescriptors = []
+  passedAt = 0
+}
+
+/** Мұрын ұшының көздердің сыртқы бұрыштары арасындағы орны: ~0.5 = тура */
+const yawRatio = (landmarks: any): number => {
+  const pts = landmarks.positions
+  const left = pts[36].x
+  const right = pts[45].x
+  return (pts[30].x - left) / (right - left)
+}
+
+const updateLiveness = (ratio: number, descriptor: Float32Array) => {
+  const frontal = ratio > 0.4 && ratio < 0.6
+  const turned = ratio < 0.3 || ratio > 0.7
+  if (frontal) {
+    frontalDescriptors.push(descriptor)
+    if (frontalDescriptors.length > 3) frontalDescriptors.shift()
+  }
+  if (stage.value === 'front1' && frontal && frontalDescriptors.length >= 2) stage.value = 'turn'
+  else if (stage.value === 'turn' && turned) stage.value = 'front2'
+  else if (stage.value === 'front2' && frontal) {
+    stage.value = 'passed'
+    passedAt = Date.now()
+  }
+  if (stage.value === 'passed' && Date.now() - passedAt > LIVENESS_TTL_MS) resetLiveness()
+}
+
+const canSubmit = computed(() =>
+  canScan.value && modelsLoaded.value && faceDetected.value && livenessPassed.value && !processing.value)
+
+// ==================== Models & camera ====================
+
+// Киоск үшін жеңіл детектор: TinyFaceDetector (0.19 МБ) SSD MobileNet (5.6 МБ) орнына — жүктелуі
+// және кадр өңдеуі әлдеқайда жылдам. Дескрипторды бұрынғыдай faceRecognitionNet есептейді,
+// сондықтан тіркелген эталондармен үйлесімді.
+const detectorOptions = () => new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.5 })
+
 const loadModels = async () => {
-  updateLoadingMessage('Модельдер жүктелуде...')
+  loadingMessage.value = 'Модельдер жүктелуде...'
   try {
     faceapi = await import('@vladmandic/face-api')
     await Promise.all([
-      faceapi.nets.ssdMobilenetv1.loadFromUri('/models'),
+      faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
       faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
       faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
     ])
+    // Алғашқы есептеу WebGL шейдерлерін компиляциялайды (бірнеше секунд) — оны алдын ала жасаймыз,
+    // әйтпесе бірінші адам кадрда «қатып» тұрғандай көрінеді
+    loadingMessage.value = 'Дайындалуда...'
+    const warm = document.createElement('canvas')
+    warm.width = 160
+    warm.height = 120
+    await faceapi.detectAllFaces(warm, detectorOptions()).withFaceLandmarks().withFaceDescriptors()
     modelsLoaded.value = true
   } catch (e) {
     console.error('Failed to load face-api models:', e)
@@ -202,28 +340,7 @@ const loadModels = async () => {
   }
 }
 
-// Load employee face descriptors
-const loadEmployees = async () => {
-  try {
-    const data = await $fetch<Array<{ id: number; name: string; faceDescriptor: string | number[] }>>('/api/employees', {
-      params: { withFace: 'true' },
-    })
-    employees.value = data
-      .filter((e) => e.faceDescriptor)
-      .map((e) => {
-        const desc = typeof e.faceDescriptor === 'string' ? JSON.parse(e.faceDescriptor) : e.faceDescriptor
-        return { id: e.id, name: e.name, descriptor: new Float32Array(desc) }
-      })
-      .filter((e) => e.descriptor.length === 128)
-  } catch (e) {
-    console.error('Failed to load employees:', e)
-    errorMsg.value = 'Қызметкерлерді жүктеу кезінде қате болды.'
-  }
-}
-
-// Start camera
 const startCamera = async () => {
-  updateLoadingMessage('Камера қосылуда...')
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
@@ -241,74 +358,62 @@ const startCamera = async () => {
   }
 }
 
-// Euclidean distance
-const euclideanDistance = (a: Float32Array, b: Float32Array): number => {
-  let sum = 0
-  for (let i = 0; i < a.length; i++) {
-    sum += (a[i] - b[i]) ** 2
-  }
-  return Math.sqrt(sum)
-}
+// ==================== Detection loop ====================
 
-// Find matching employee
-const findMatch = (descriptor: Float32Array): { id: number; name: string; distance: number } | null => {
-  let bestMatch: { id: number; name: string; distance: number } | null = null
-  const threshold = 0.5
+let stopped = false
+let loopTimer: ReturnType<typeof setTimeout> | null = null
 
-  for (const emp of employees.value) {
-    const dist = euclideanDistance(descriptor, emp.descriptor)
-    if (dist < threshold && (!bestMatch || dist < bestMatch.distance)) {
-      bestMatch = { id: emp.id, name: emp.name, distance: dist }
-    }
-  }
-
-  return bestMatch
-}
-
-// Detect faces in video
 const detectFaces = async () => {
-  if (!videoRef.value || !canvasRef.value || !modelsLoaded.value || !cameraReady.value || processing.value) return
-
   const video = videoRef.value
   const canvas = canvasRef.value
+  if (!video || !canvas || !modelsLoaded.value || !cameraReady.value || processing.value) return
 
   const displaySize = { width: video.videoWidth, height: video.videoHeight }
   faceapi.matchDimensions(canvas, displaySize)
 
-  const detection = await faceapi
-    .detectSingleFace(video, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
+  const detections = await faceapi
+    .detectAllFaces(video, detectorOptions())
     .withFaceLandmarks()
-    .withFaceDescriptor()
+    .withFaceDescriptors()
 
   const ctx = canvas.getContext('2d')
-  if (ctx) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
-  }
+  ctx?.clearRect(0, 0, canvas.width, canvas.height)
 
-  if (detection) {
-    faceDetected.value = true
-    currentDescriptor = detection.descriptor
-
-    // Draw detection box
-    const resizedDetection = faceapi.resizeResults(detection, displaySize)
-    if (ctx) {
-      const box = resizedDetection.detection.box
-      ctx.strokeStyle = '#22c55e'
-      ctx.lineWidth = 3
-      ctx.strokeRect(box.x, box.y, box.width, box.height)
-    }
-
-    // Try to match
-    const match = findMatch(detection.descriptor)
-    matchedEmployee = match ? { id: match.id, name: match.name } : null
-  } else {
+  // Кадрда дәл бір адам болуы керек
+  if (detections.length !== 1) {
     faceDetected.value = false
-    currentDescriptor = null
-    matchedEmployee = null
+    resetLiveness()
+    if (detections.length > 1) errorMsg.value = MULTI_FACE_MSG
+    return
+  }
+  if (errorMsg.value === MULTI_FACE_MSG) errorMsg.value = ''
+
+  const detection = detections[0]
+  faceDetected.value = true
+  const box = faceapi.resizeResults(detection, displaySize).detection.box
+  if (ctx) {
+    ctx.strokeStyle = livenessPassed.value ? '#22c55e' : '#facc15'
+    ctx.lineWidth = 3
+    ctx.strokeRect(box.x, box.y, box.width, box.height)
+  }
+  updateLiveness(yawRatio(detection.landmarks), detection.descriptor)
+
+  // Киоскіде әрқашан қолсыз режим; әкімші үшін — «Авто-сканер» қосылса
+  if ((autoScan.value || kiosk.value) && livenessPassed.value && !processing.value) {
+    await handleScan('auto')
   }
 }
 
-// Capture photo from video
+const loop = async () => {
+  if (stopped) return
+  try {
+    await detectFaces()
+  } catch (e) {
+    console.error('detection error', e)
+  }
+  loopTimer = setTimeout(loop, 200)
+}
+
 const capturePhoto = (): string | null => {
   if (!videoRef.value) return null
   const tempCanvas = document.createElement('canvas')
@@ -320,30 +425,23 @@ const capturePhoto = (): string | null => {
   return tempCanvas.toDataURL('image/jpeg', 0.8)
 }
 
-// Handle scan (check-in / check-out)
-const handleScan = async (type: 'in' | 'out') => {
-  if (!faceDetected.value || !currentDescriptor || processing.value) return
+// ==================== Submit ====================
+// Клиент тек бет дескрипторларын жібереді; қызметкерді сервер анықтайды.
+
+const handleScan = async (type: 'in' | 'out' | 'auto') => {
+  if (!canSubmit.value || frontalDescriptors.length < 2) return
 
   errorMsg.value = ''
   result.value = null
   processing.value = true
+  const descriptors = frontalDescriptors.map(d => Array.from(d))
+  const photo = capturePhoto()
 
   try {
-    const match = matchedEmployee || findMatch(currentDescriptor)
-
-    if (!match) {
-      result.value = {
-        success: false,
-        message: 'Бет анықталмады. Жүйеде тіркелген қызметкер табылмады.',
-      }
-      return
-    }
-
-    const photo = capturePhoto()
-
     const response = await $fetch<{
       success: boolean
       employeeName?: string
+      type?: 'in' | 'out'
       time?: string
       isLate?: boolean
       lateMinutes?: number
@@ -351,19 +449,15 @@ const handleScan = async (type: 'in' | 'out') => {
       message?: string
     }>('/api/attendance/checkin', {
       method: 'POST',
-      body: {
-        employeeId: match.id,
-        type,
-        photo,
-      },
+      body: { type, descriptors, photo },
     })
 
     result.value = {
-      success: true,
-      employeeName: response.employeeName || match.name,
-      message: type === 'in' ? 'Сәтті тіркелді!' : 'Шығу сәтті тіркелді!',
-      type,
-      time: response.time || new Date().toLocaleTimeString('kk-KZ', { hour: '2-digit', minute: '2-digit' }),
+      success: response.success,
+      employeeName: response.employeeName,
+      message: response.message || '',
+      type: response.type,
+      time: response.time?.slice(0, 5),
       isLate: response.isLate,
       lateMinutes: response.lateMinutes,
       overtimeMinutes: response.overtimeMinutes,
@@ -371,55 +465,60 @@ const handleScan = async (type: 'in' | 'out') => {
   } catch (e: any) {
     result.value = {
       success: false,
-      message: e.data?.statusMessage || e.message || 'Тіркеу кезінде қате пайда болды.',
+      message: e.data?.message || e.data?.statusMessage || e.message || 'Тіркеу кезінде қате пайда болды.',
     }
   } finally {
-    processing.value = false
+    // Нәтиже бірнеше секундтан кейін өзі жоғалады — келесі адамға экран таза
+    const shown = result.value
+    setTimeout(() => {
+      if (result.value === shown) result.value = null
+    }, 6000)
+    resetLiveness()
+    // Келесі адамға дейін қысқа үзіліс (бір адамның қайта-қайта жазылуын болдырмау)
+    setTimeout(() => {
+      processing.value = false
+    }, 2500)
   }
 }
 
-// Auto-scan watcher
-watch(autoScan, (enabled) => {
-  if (autoScanInterval) {
-    clearInterval(autoScanInterval)
-    autoScanInterval = null
+// ==================== Wake Lock ====================
+// Есік алдындағы телефон/планшет экраны сөнбеуі керек
+
+let wakeLock: { release: () => Promise<void> } | null = null
+const requestWakeLock = async () => {
+  try {
+    const nav = navigator as Navigator & { wakeLock?: { request: (t: 'screen') => Promise<{ release: () => Promise<void> }> } }
+    if (nav.wakeLock && document.visibilityState === 'visible') wakeLock = await nav.wakeLock.request('screen')
+  } catch {
+    // қолдамайтын браузер немесе батарея үнемдеу режимі
   }
+}
+const onVisibility = () => {
+  if (document.visibilityState === 'visible' && kiosk.value) requestWakeLock()
+}
 
-  if (enabled) {
-    autoCountdown.value = 5
-    autoScanInterval = setInterval(() => {
-      if (!faceDetected.value || processing.value) {
-        autoCountdown.value = 5
-        return
-      }
+// ==================== Lifecycle ====================
 
-      autoCountdown.value--
-
-      if (autoCountdown.value <= 0) {
-        handleScan('in')
-        autoCountdown.value = 5
-      }
-    }, 1000)
-  }
-})
-
-// Lifecycle
 onMounted(async () => {
-  await Promise.all([loadModels(), loadEmployees()])
-  await startCamera()
-
-  // Start detection loop
-  detectionInterval = setInterval(detectFaces, 500)
+  tick()
+  clockTimer = setInterval(tick, 10_000)
+  await loadKioskStatus()
+  if (!canScan.value) return
+  if (kiosk.value) requestWakeLock()
+  document.addEventListener('visibilitychange', onVisibility)
+  // Камера мен модельдер қатар: камераға рұқсат сұрауы бірден шығады
+  await Promise.all([loadModels(), startCamera()])
+  loop()
 })
 
 onBeforeUnmount(() => {
-  if (detectionInterval) clearInterval(detectionInterval)
-  if (autoScanInterval) clearInterval(autoScanInterval)
-
-  // Stop camera
+  stopped = true
+  if (clockTimer) clearInterval(clockTimer)
+  document.removeEventListener('visibilitychange', onVisibility)
+  wakeLock?.release().catch(() => {})
+  if (loopTimer) clearTimeout(loopTimer)
   if (videoRef.value?.srcObject) {
-    const tracks = (videoRef.value.srcObject as MediaStream).getTracks()
-    tracks.forEach((track) => track.stop())
+    (videoRef.value.srcObject as MediaStream).getTracks().forEach(track => track.stop())
   }
 })
 </script>

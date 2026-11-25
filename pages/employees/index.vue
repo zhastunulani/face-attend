@@ -1,10 +1,10 @@
 <template>
-  <div class="max-w-7xl mx-auto px-4 py-6">
+  <div class="page">
     <!-- Header -->
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
       <div>
-        <h1 class="text-2xl font-bold text-gray-900">Қызметкерлер</h1>
-        <p class="text-gray-500 mt-1">Барлығы: {{ filteredEmployees.length }}</p>
+        <h1 class="page-title">Қызметкерлер</h1>
+        <p class="page-subtitle">Барлығы: {{ filteredEmployees.length }}</p>
       </div>
       <button v-if="isAdmin || isHead" @click="openCreateModal" class="btn-primary flex items-center gap-2 self-start">
         <span class="text-lg leading-none">+</span>
@@ -44,7 +44,7 @@
 
     <!-- Empty state -->
     <div v-else-if="filteredEmployees.length === 0" class="text-center py-12 text-gray-400">
-      <p class="text-4xl mb-2">👥</p>
+      <AppIcon name="users" :size="40" :stroke="1.25" class="mx-auto mb-2 text-gray-300" />
       <p>Қызметкер табылмады</p>
     </div>
 
@@ -77,7 +77,7 @@
                     {{ emp.name?.charAt(0) }}
                   </div>
                   <span
-                    v-if="hasFace(emp)"
+                    v-if="emp.hasFace"
                     class="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-green-500 rounded-full border-2 border-white flex items-center justify-center"
                     title="Face descriptor бар"
                   >
@@ -86,7 +86,8 @@
                 </div>
                 <div>
                   <p class="font-medium text-gray-900">{{ emp.name }}</p>
-                  <p v-if="!hasFace(emp)" class="text-xs text-orange-500">Face descriptor жоқ</p>
+                  <p v-if="!emp.hasFace" class="text-xs text-orange-500">Бет тіркелмеген</p>
+                  <p v-else-if="emp.faceTemplates < 3" class="text-xs text-yellow-600" title="Камерамен қайта тіркесеңіз, тану дәлірек болады">Бетті қайта тіркеу ұсынылады</p>
                 </div>
               </div>
             </td>
@@ -145,7 +146,7 @@
                 {{ emp.name?.charAt(0) }}
               </div>
               <span
-                v-if="hasFace(emp)"
+                v-if="emp.hasFace"
                 class="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-green-500 rounded-full border-2 border-white flex items-center justify-center"
               >
                 <svg class="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
@@ -179,8 +180,8 @@
           </div>
           <div>
             <span class="text-gray-400">Face:</span>
-            <span class="ml-1" :class="hasFace(emp) ? 'text-green-600' : 'text-orange-500'">
-              {{ hasFace(emp) ? 'Бар' : 'Жоқ' }}
+            <span class="ml-1" :class="emp.hasFace ? 'text-green-600' : 'text-orange-500'">
+              {{ emp.hasFace ? 'Бар' : 'Жоқ' }}
             </span>
           </div>
         </div>
@@ -244,8 +245,8 @@
               </select>
             </div>
 
-            <!-- Salary -->
-            <div>
+            <!-- Salary (тек admin өзгертеді) -->
+            <div v-if="isAdmin">
               <label class="label">Айлық ставка (KZT)</label>
               <input v-model.number="form.salaryRate" type="number" class="input" min="0" step="1000" placeholder="0" />
             </div>
@@ -280,22 +281,27 @@
               <!-- Camera view -->
               <div v-if="cameraActive" class="space-y-2">
                 <div class="relative rounded-xl overflow-hidden border border-gray-200 bg-black">
-                  <video ref="videoRef" autoplay playsinline class="w-full" />
+                  <video ref="videoRef" autoplay playsinline class="w-full -scale-x-100" />
                 </div>
+                <p class="text-xs text-gray-500">Камераға тура қарап, 2 секунд қозғалмаңыз — бірнеше кадр түсіріледі.</p>
                 <div class="flex gap-2">
-                  <button type="button" @click="capturePhoto" class="btn-primary text-sm">Суретке түсіру</button>
+                  <button type="button" @click="capturePhoto" :disabled="faceLoading" class="btn-primary text-sm">
+                    {{ faceLoading ? `Түсірілуде... ${captureProgress}` : 'Суретке түсіру' }}
+                  </button>
                   <button type="button" @click="stopCamera" class="btn-secondary text-sm">Болдырмау</button>
                 </div>
               </div>
               <canvas ref="canvasRef" class="hidden" />
 
               <!-- Face descriptor status -->
-              <div v-if="form.faceDescriptor" class="mt-2 text-sm text-green-600 flex items-center gap-1">
+              <div v-if="form.faceDescriptors.length" class="mt-2 text-sm flex items-center gap-1"
+                :class="form.faceDescriptors.length >= 3 ? 'text-green-600' : 'text-yellow-600'">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                Face descriptor алынды (128 dim)
+                Бет эталоны алынды: {{ form.faceDescriptors.length }} кадр
+                <span v-if="form.faceDescriptors.length < 3" class="text-gray-500">(камерамен түсірсеңіз дәлірек)</span>
               </div>
               <div v-if="faceError" class="mt-2 text-sm text-red-500">{{ faceError }}</div>
-              <div v-if="faceLoading" class="mt-2 text-sm text-gray-500">Face descriptor алынуда...</div>
+              <div v-if="faceLoading && !cameraActive" class="mt-2 text-sm text-gray-500">Бет талдануда...</div>
             </div>
 
             <!-- Actions -->
@@ -355,7 +361,9 @@ interface Employee {
   positionId: number | null
   photoPath: string | null
   scheduleId: number | null
-  salaryRate: number
+  salaryRate: number | null
+  hasFace: boolean
+  faceTemplates: number
   vacationDaysLeft: number
   isActive: boolean
   createdAt: string
@@ -442,31 +450,11 @@ const getScheduleName = (id: number | null) => {
   return schedules.value.find(s => s.id === id)?.name ?? '-'
 }
 
-const formatSalary = (rate: number) => {
+const formatSalary = (rate: number | null) => {
   if (!rate) return '-'
   return new Intl.NumberFormat('kk-KZ').format(rate) + ' ₸'
 }
 
-const hasFace = (emp: Employee) => {
-  // We don't have faceDescriptor in the list response, so check via a known list
-  return faceStatusMap.value.has(emp.id)
-}
-
-// Track which employees have face descriptors
-const faceStatusMap = ref<Set<number>>(new Set())
-
-const fetchFaceStatus = async () => {
-  try {
-    const withFace = await $fetch<{ id: number }[]>('/api/employees', { query: { withFace: 'true' } })
-    faceStatusMap.value = new Set(withFace.map(e => e.id))
-  } catch {
-    // ignore
-  }
-}
-
-onMounted(() => {
-  fetchFaceStatus()
-})
 
 // ==================== Positions filtered by dept ====================
 
@@ -488,7 +476,7 @@ const form = reactive({
   scheduleId: null as number | null,
   salaryRate: 0,
   photo: '' as string,
-  faceDescriptor: '' as string,
+  faceDescriptors: [] as number[][],
 })
 
 const photoPreview = ref<string | null>(null)
@@ -500,7 +488,7 @@ const resetForm = () => {
   form.scheduleId = null
   form.salaryRate = 0
   form.photo = ''
-  form.faceDescriptor = ''
+  form.faceDescriptors = []
   photoPreview.value = null
   faceError.value = ''
   faceLoading.value = false
@@ -518,9 +506,9 @@ const openEditModal = (emp: Employee) => {
   form.departmentId = emp.departmentId
   form.positionId = emp.positionId
   form.scheduleId = emp.scheduleId
-  form.salaryRate = emp.salaryRate
+  form.salaryRate = emp.salaryRate ?? 0
   form.photo = ''
-  form.faceDescriptor = ''
+  form.faceDescriptors = []
   photoPreview.value = emp.photoPath
   faceError.value = ''
   faceLoading.value = false
@@ -543,11 +531,11 @@ const saveEmployee = async () => {
       departmentId: form.departmentId,
       positionId: form.positionId,
       scheduleId: form.scheduleId,
-      salaryRate: form.salaryRate,
     }
+    if (isAdmin.value) body.salaryRate = form.salaryRate
 
     if (form.photo) body.photo = form.photo
-    if (form.faceDescriptor) body.faceDescriptor = form.faceDescriptor
+    if (form.faceDescriptors.length) body.faceDescriptors = form.faceDescriptors
 
     if (editingEmployee.value) {
       await $fetch(`/api/employees/${editingEmployee.value.id}`, {
@@ -562,9 +550,9 @@ const saveEmployee = async () => {
     }
 
     closeModal()
-    await Promise.all([fetchEmployees(), fetchFaceStatus()])
+    await fetchEmployees()
   } catch (e: any) {
-    alert(e.data?.statusMessage || e.message || 'Қате орын алды')
+    alert(e.data?.message || e.data?.statusMessage || e.message || 'Қате орын алды')
   } finally {
     saving.value = false
   }
@@ -589,9 +577,9 @@ const deleteEmployee = async () => {
     await $fetch(`/api/employees/${deletingEmployee.value.id}`, { method: 'DELETE' })
     showDeleteModal.value = false
     deletingEmployee.value = null
-    await Promise.all([fetchEmployees(), fetchFaceStatus()])
+    await fetchEmployees()
   } catch (e: any) {
-    alert(e.data?.statusMessage || e.message || 'Қате орын алды')
+    alert(e.data?.message || e.data?.statusMessage || e.message || 'Қате орын алды')
   } finally {
     deleting.value = false
   }
@@ -646,25 +634,59 @@ const stopCamera = () => {
   cameraActive.value = false
 }
 
+const captureProgress = ref('')
+const wait = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+/**
+ * Камерадан бірнеше кадр (5) түсіріп, әрқайсысынан бет дескрипторын аламыз.
+ * Бір кадрлы эталонға қарағанда тану әлдеқайда тұрақты (жарық, бұрыш, мимика).
+ */
 const capturePhoto = async () => {
   if (!videoRef.value || !canvasRef.value) return
-
   const video = videoRef.value
   const canvas = canvasRef.value
-  canvas.width = video.videoWidth
-  canvas.height = video.videoHeight
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return
+  faceLoading.value = true
+  faceError.value = ''
+  form.faceDescriptors = []
 
-  ctx.drawImage(video, 0, 0)
-  const dataUrl = canvas.toDataURL('image/jpeg', 0.85)
-
-  form.photo = dataUrl
-  photoPreview.value = dataUrl
-  stopCamera()
-
-  // Extract face descriptor
-  await extractFaceDescriptor(canvas)
+  try {
+    await loadFaceModels()
+    if (!faceModelsLoaded) {
+      faceError.value = 'Face модельдері жүктелмеді'
+      return
+    }
+    const FRAMES = 5
+    const descriptors: number[][] = []
+    let lastError = ''
+    let bestPhoto = ''
+    for (let i = 0; i < FRAMES; i++) {
+      captureProgress.value = `${i + 1}/${FRAMES}`
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
+      canvas.getContext('2d')?.drawImage(video, 0, 0)
+      const r = await analyzeFrame(canvas)
+      if (typeof r === 'string') lastError = r
+      else {
+        descriptors.push(r)
+        if (!bestPhoto || i === Math.floor(FRAMES / 2)) bestPhoto = canvas.toDataURL('image/jpeg', 0.85)
+      }
+      await wait(350)
+    }
+    if (descriptors.length < 3) {
+      faceError.value = lastError || 'Бет жеткілікті анық түспеді. Қайталаңыз.'
+      return
+    }
+    form.faceDescriptors = descriptors
+    form.photo = bestPhoto
+    photoPreview.value = bestPhoto
+    stopCamera()
+  } catch (e) {
+    console.error('Face capture error:', e)
+    faceError.value = 'Бет эталонын алу кезінде қате орын алды'
+  } finally {
+    faceLoading.value = false
+    captureProgress.value = ''
+  }
 }
 
 const onFileUpload = async (event: Event) => {
@@ -675,19 +697,20 @@ const onFileUpload = async (event: Event) => {
   const reader = new FileReader()
   reader.onload = async (e) => {
     const dataUrl = e.target?.result as string
-    form.photo = dataUrl
-    photoPreview.value = dataUrl
 
-    // Create image element for face detection
+    // Суретті кішірейтеміз (сервер шегі 1.5 МБ) және бетті анықтаймыз
     const img = new Image()
     img.onload = async () => {
       const canvas = canvasRef.value
       if (!canvas) return
-      canvas.width = img.width
-      canvas.height = img.height
+      const scale = Math.min(1, 800 / Math.max(img.width, img.height))
+      canvas.width = Math.round(img.width * scale)
+      canvas.height = Math.round(img.height * scale)
       const ctx = canvas.getContext('2d')
       if (!ctx) return
-      ctx.drawImage(img, 0, 0)
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+      form.photo = canvas.toDataURL('image/jpeg', 0.85)
+      photoPreview.value = form.photo
       await extractFaceDescriptor(canvas)
     }
     img.src = dataUrl
@@ -698,10 +721,29 @@ const onFileUpload = async (event: Event) => {
   target.value = ''
 }
 
+/** Бір кадрды талдау: дескриптор немесе қате мәтіні */
+const analyzeFrame = async (canvas: HTMLCanvasElement): Promise<number[] | string> => {
+  const detections = await faceapi
+    .detectAllFaces(canvas, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
+    .withFaceLandmarks()
+    .withFaceDescriptors()
+
+  if (!detections.length) return 'Бет табылмады. Басқа фото қолданыңыз.'
+  if (detections.length > 1) return 'Фотода тек бір адам болуы керек.'
+  const detection = detections[0]
+  // Сапа: анық әрі жеткілікті үлкен бет (нашар эталон қате сәйкестендіруге әкеледі)
+  const box = detection.detection.box
+  if (detection.detection.score < 0.8 || box.width < canvas.width * 0.15) {
+    return 'Бет анық емес немесе тым кіші. Жақынырақ, жарық жерде түсіріңіз.'
+  }
+  return Array.from(detection.descriptor as Float32Array)
+}
+
+/** Жүктелген файлдан (бір кадр) эталон алу */
 const extractFaceDescriptor = async (canvas: HTMLCanvasElement) => {
   faceLoading.value = true
   faceError.value = ''
-  form.faceDescriptor = ''
+  form.faceDescriptors = []
 
   try {
     await loadFaceModels()
@@ -709,22 +751,12 @@ const extractFaceDescriptor = async (canvas: HTMLCanvasElement) => {
       faceError.value = 'Face модельдері жүктелмеді'
       return
     }
-
-    const detection = await faceapi
-      .detectSingleFace(canvas)
-      .withFaceLandmarks()
-      .withFaceDescriptor()
-
-    if (!detection) {
-      faceError.value = 'Бет табылмады. Басқа фото қолданыңыз.'
-      return
-    }
-
-    const descriptor = Array.from(detection.descriptor)
-    form.faceDescriptor = JSON.stringify(descriptor)
+    const r = await analyzeFrame(canvas)
+    if (typeof r === 'string') faceError.value = r
+    else form.faceDescriptors = [r]
   } catch (e) {
     console.error('Face detection error:', e)
-    faceError.value = 'Face descriptor алу кезінде қате орын алды'
+    faceError.value = 'Бет эталонын алу кезінде қате орын алды'
   } finally {
     faceLoading.value = false
   }
@@ -732,7 +764,7 @@ const extractFaceDescriptor = async (canvas: HTMLCanvasElement) => {
 
 const clearPhoto = () => {
   form.photo = ''
-  form.faceDescriptor = ''
+  form.faceDescriptors = []
   photoPreview.value = null
   faceError.value = ''
 }

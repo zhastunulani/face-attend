@@ -14,4 +14,9 @@ export default defineNuxtRouteMiddleware(async (to) => {
   if (!user.value) {
     return navigateTo('/login')
   }
+
+  // Стандарт/уақытша құпия сөз: алдымен ауыстыру керек
+  if (user.value.mustChangePassword && to.path !== '/settings') {
+    return navigateTo('/settings')
+  }
 })

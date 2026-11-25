@@ -24,7 +24,10 @@ logs
 !.env.example
 
 # Database
-data/*.db
+data/*.db*
 
 # Uploads
 public/uploads/
+
+# Пакеты развёртывания
+.release

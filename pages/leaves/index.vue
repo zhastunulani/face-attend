@@ -1,9 +1,9 @@
 <template>
-  <div class="max-w-5xl mx-auto px-4 py-6">
+  <div class="page !max-w-5xl">
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
       <div>
-        <h1 class="text-2xl font-bold text-gray-900">Демалыс өтініштері</h1>
-        <p class="text-gray-500 mt-1">Демалыс және босату өтініштері</p>
+        <h1 class="page-title">Демалыс өтініштері</h1>
+        <p class="page-subtitle">Демалыс және босату өтініштері</p>
       </div>
       <button class="btn-primary" @click="openCreateModal()">+ Жаңа өтініш</button>
     </div>
@@ -112,6 +112,7 @@
 </template>
 
 <script setup lang="ts">
+const { notifyError } = useNotify()
 const leaveTypes = [
   { value: 'vacation', label: 'Демалыс' },
   { value: 'sick', label: 'Ауру' },
@@ -172,7 +173,7 @@ const fetchData = async () => {
     leaves.value = leavesData
     employees.value = empData
   } catch (e) {
-    console.error(e)
+    notifyError(e)
   } finally {
     loading.value = false
   }
@@ -203,7 +204,7 @@ const handleCreate = async () => {
     showModal.value = false
     await fetchData()
   } catch (e) {
-    console.error(e)
+    notifyError(e)
   } finally {
     saving.value = false
   }
@@ -216,9 +217,9 @@ const updateStatus = async (id: number, status: string) => {
     await $fetch(`/api/leaves/${id}`, { method: 'PUT', body: { status } })
     await fetchData()
   } catch (e) {
-    console.error(e)
+    notifyError(e)
   }
 }
 
-fetchData()
+onMounted(fetchData)
 </script>
