@@ -6,7 +6,11 @@
         <NuxtLink v-if="!kiosk" to="/" class="p-2 -ml-2 rounded-lg text-white/70 hover:text-white hover:bg-white/10" aria-label="Артқа">
           <AppIcon name="chevron-left" />
         </NuxtLink>
-        <AppLogo dark :size="30" />
+        <!-- 8 рет басу — әкімші режимі (қолданбада) немесе кіру беті (браузерде) -->
+        <button type="button" class="relative select-none" aria-label="FaceAttend" @click="onLogoTap">
+          <AppLogo dark :size="30" />
+        </button>
+        <span v-if="tapHint" class="text-xs text-white/70">{{ tapHint }}</span>
       </div>
       <div class="flex items-center gap-3">
       <button
@@ -65,7 +69,7 @@
       <div v-if="kioskChecked && !canScan" class="rounded-2xl p-5 bg-yellow-50 border border-yellow-200 text-sm text-yellow-800 space-y-2">
         <p class="font-semibold">Бұл құрылғы киоск ретінде тіркелмеген</p>
         <p>Сканерлеу тек тіркелген құрылғыдан мүмкін. Әкімші немесе бөлім басшысы осы құрылғыда жүйеге кіріп, киоскіні белсендіруі керек.</p>
-        <NuxtLink to="/login" class="inline-block text-primary-600 font-medium hover:underline">Жүйеге кіру →</NuxtLink>
+        <NuxtLink to="/login?redirect=/scan" class="inline-block text-primary-600 font-medium hover:underline">Жүйеге кіру →</NuxtLink>
       </div>
       <div v-else-if="kioskChecked && !kiosk && canActivate" class="rounded-xl p-4 bg-white border border-primary-200 shadow-card text-sm space-y-3">
         <div class="flex items-start gap-3">
@@ -307,6 +311,33 @@ const activateKiosk = async () => {
   } finally {
     activating.value = false
   }
+}
+
+// ==================== Жасырын әкімші режимі ====================
+// Android киоск-қолданбасы `window.FaceAttendApp` көпірін береді.
+
+const ADMIN_TAPS = 8
+let taps = 0
+let tapTimer: ReturnType<typeof setTimeout> | null = null
+const tapHint = ref('')
+const appBridge = (): { openAdmin: () => void } | null =>
+  import.meta.client ? (window as any).FaceAttendApp ?? null : null
+
+const onLogoTap = () => {
+  taps++
+  if (tapTimer) clearTimeout(tapTimer)
+  tapTimer = setTimeout(() => { taps = 0; tapHint.value = '' }, 2500)
+  const left = ADMIN_TAPS - taps
+  if (left <= 0) {
+    taps = 0
+    tapHint.value = ''
+    const bridge = appBridge()
+    if (bridge) bridge.openAdmin()
+    else navigateTo('/login?redirect=/scan')
+    return
+  }
+  // Android-тағы «әзірлеуші режимі» сияқты: соңғы басуларда кері санақ
+  tapHint.value = left <= 4 ? `тағы ${left}` : ''
 }
 
 // ==================== Дауыстық нұсқаулар ====================
@@ -610,6 +641,8 @@ const onVisibility = () => {
 
 onMounted(async () => {
   voice.init()
+  // Қолданбаның WebView-ында дыбыс басусыз рұқсат етілген
+  if (appBridge()) voice.unlock()
   // Экранды кез келген басу дыбысқа рұқсат береді (мобильдіде тек click/touchend жарайды)
   for (const ev of UNLOCK_EVENTS) document.addEventListener(ev, onUserGesture, true)
   tick()

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- public/logo.svg негізіндегі белгі: бет-сканер рамкасы (108dp адаптивті иконка, мазмұны ортаңғы 64 бірлікте) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:translateX="22" android:translateY="22">
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="4"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M16,24v-4a4,4 0,0 1,4 -4h4M40,16h4a4,4 0,0 1,4 4v4M48,40v4a4,4 0,0 1,-4 4h-4M24,48h-4a4,4 0,0 1,-4 -4v-4" />
+        <path
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="4"
+            android:strokeLineCap="round"
+            android:pathData="M25,37c0,0 2.5,3 7,3s7,-3 7,-3" />
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M26,27m-2.5,0a2.5,2.5 0,1 1,5 0a2.5,2.5 0,1 1,-5 0M38,27m-2.5,0a2.5,2.5 0,1 1,5 0a2.5,2.5 0,1 1,-5 0" />
+    </group>
+</vector>

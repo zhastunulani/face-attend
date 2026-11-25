@@ -69,7 +69,10 @@ const handleLogin = async () => {
   loading.value = true
   try {
     const user = await login(form.login, form.password)
-    navigateTo(user.mustChangePassword ? '/settings' : '/')
+    // ?redirect=/scan — киоск-қолданбадан кіргенде сканерге қайту (тек өз сайтының жолы)
+    const r = useRoute().query.redirect
+    const back = typeof r === 'string' && r.startsWith('/') && !r.startsWith('//') ? r : '/'
+    navigateTo(user.mustChangePassword ? '/settings' : back)
   } catch (e: any) {
     error.value = e.data?.message || e.data?.statusMessage || 'Кіру кезінде қате пайда болды'
   } finally {

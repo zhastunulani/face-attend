@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="navy">#0E3449</color>
+    <color name="brand">#495CF8</color>
+
+    <style name="Theme.Kiosk" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/brand</item>
+        <item name="colorAccent">@color/brand</item>
+        <item name="android:windowBackground">@color/navy</item>
+        <item name="android:statusBarColor">@color/navy</item>
+        <item name="android:navigationBarColor">@color/navy</item>
+    </style>
+</resources>
