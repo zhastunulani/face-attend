@@ -8,11 +8,33 @@
         </NuxtLink>
         <AppLogo dark :size="30" />
       </div>
+      <div class="flex items-center gap-3">
+      <button
+        v-if="voice.supported && canScan"
+        type="button"
+        class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-sm bg-white/10 hover:bg-white/20"
+        :title="voiceTitle"
+        @click="cycleVoice"
+      >
+        <AppIcon :name="voice.lang.value === 'off' ? 'volume-x' : 'volume'" :size="18" />
+        <span class="hidden sm:inline">{{ voiceLabel }}</span>
+      </button>
       <div class="text-right leading-tight">
         <p class="text-2xl font-semibold tabular-nums tracking-tight">{{ clock }}</p>
         <p class="text-xs text-white/60">{{ todayLabel }}</p>
       </div>
+      </div>
     </div>
+
+    <!-- Браузер дыбысты тек экранды басқаннан кейін рұқсат етеді -->
+    <button
+      v-if="canScan && voice.supported && voice.lang.value !== 'off' && !voice.unlocked.value"
+      type="button"
+      class="w-full bg-primary-600 text-white text-sm py-2 flex items-center justify-center gap-2"
+      @click="voice.unlock()"
+    >
+      <AppIcon name="volume" :size="16" /> Дыбысты қосу үшін экранды бір рет басыңыз
+    </button>
 
     <div class="max-w-2xl mx-auto px-4 py-6 space-y-4">
       <!-- Status indicator -->
@@ -287,6 +309,27 @@ const activateKiosk = async () => {
   }
 }
 
+// ==================== Дауыстық нұсқаулар ====================
+
+const voice = useVoice()
+const VOICE_LABELS = { kk: 'Қазақша', ru: 'Орысша', off: 'Дыбыссыз' } as const
+const voiceLabel = computed(() => VOICE_LABELS[voice.lang.value])
+const voiceTitle = 'Дауыстық нұсқаулар: басып ауыстыру (қазақша → орысша → дыбыссыз)'
+const cycleVoice = () => {
+  voice.unlock()
+  const order = ['kk', 'ru', 'off'] as const
+  voice.setLang(order[(order.indexOf(voice.lang.value) + 1) % order.length])
+}
+
+/** Әр кадрдан кейін: қазіргі кезеңге сай нұсқау (бірдей фраза жиі қайталанбайды) */
+const voicePrompt = () => {
+  if (processing.value || result.value || !(kiosk.value || autoScan.value)) return
+  if (!faceDetected.value) return
+  if (stage.value === 'front1') voice.say('look_straight', { repeatAfterMs: 8000 })
+  else if (stage.value === 'turn') voice.say('turn_head', { repeatAfterMs: 5000 })
+  else if (stage.value === 'front2') voice.say('look_again', { repeatAfterMs: 5000 })
+}
+
 // ==================== Liveness (басты бұру) ====================
 // Тегіс фотоны бұрғанда бет пропорциялары өзгермейді, ал тірі адам басын бұрғанда
 // мұрын көз сызығына қатысты жылжиды. Реттілік: тура -> бүйірге -> тура.
@@ -414,7 +457,10 @@ const detectFaces = async () => {
   if (detections.length !== 1) {
     faceDetected.value = false
     resetLiveness()
-    if (detections.length > 1) errorMsg.value = MULTI_FACE_MSG
+    if (detections.length > 1) {
+      errorMsg.value = MULTI_FACE_MSG
+      if (kiosk.value || autoScan.value) voice.say('one_face', { repeatAfterMs: 8000 })
+    }
     return
   }
   if (errorMsg.value === MULTI_FACE_MSG) errorMsg.value = ''
@@ -428,6 +474,7 @@ const detectFaces = async () => {
     ctx.strokeRect(box.x, box.y, box.width, box.height)
   }
   updateLiveness(yawRatio(detection.landmarks), detection.descriptor)
+  voicePrompt()
 
   // Киоскіде әрқашан қолсыз режим; әкімші үшін — «Авто-сканер» қосылса
   if ((autoScan.value || kiosk.value) && livenessPassed.value && !processing.value) {
@@ -503,11 +550,14 @@ const handleScan = async (type: 'in' | 'out' | 'auto') => {
       scheduleStart: response.scheduleStart,
       scheduleEnd: response.scheduleEnd,
     }
+    announce(result.value)
   } catch (e: any) {
     result.value = {
       success: false,
       message: e.data?.message || e.data?.statusMessage || e.message || 'Тіркеу кезінде қате пайда болды.',
     }
+    voice.chime('fail')
+    voice.say(e?.statusCode === 404 || e?.data?.statusCode === 404 ? 'not_recognized' : 'error', { interrupt: true, repeatAfterMs: 0, delay: 0.35 })
   } finally {
     // Нәтиже бірнеше секундтан кейін өзі жоғалады — келесі адамға экран таза
     const shown = result.value
@@ -520,6 +570,19 @@ const handleScan = async (type: 'in' | 'out' | 'auto') => {
       processing.value = false
     }, 2500)
   }
+}
+
+/** Нәтижені дауыстап айту: алдымен сигнал, сосын фраза */
+const announce = (r: NonNullable<typeof result.value>) => {
+  const opts = { interrupt: true, repeatAfterMs: 0, delay: 0.35 }
+  if (!r.success) {
+    voice.chime('fail')
+    voice.say('already', opts)
+    return
+  }
+  voice.chime('ok')
+  if (r.type === 'in') voice.say(r.lateMinutes ? 'welcome_late' : 'welcome', opts)
+  else voice.say(r.earlyLeaveMinutes ? 'bye_early' : 'bye', opts)
 }
 
 // ==================== Wake Lock ====================
@@ -541,6 +604,9 @@ const onVisibility = () => {
 // ==================== Lifecycle ====================
 
 onMounted(async () => {
+  voice.init()
+  // Экранды кез келген басу дыбысқа рұқсат береді
+  document.addEventListener('pointerdown', voice.unlock, { once: true })
   tick()
   clockTimer = setInterval(tick, 10_000)
   await loadKioskStatus()
@@ -554,6 +620,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stopped = true
+  document.removeEventListener('pointerdown', voice.unlock)
+  voice.stop()
   if (clockTimer) clearInterval(clockTimer)
   document.removeEventListener('visibilitychange', onVisibility)
   wakeLock?.release().catch(() => {})
