@@ -31,7 +31,7 @@
       v-if="canScan && voice.supported && voice.lang.value !== 'off' && !voice.unlocked.value"
       type="button"
       class="w-full bg-primary-600 text-white text-sm py-2 flex items-center justify-center gap-2"
-      @click="voice.unlock()"
+      @click="voice.unlock(); voice.sample()"
     >
       <AppIcon name="volume" :size="16" /> Дыбысты қосу үшін экранды бір рет басыңыз
     </button>
@@ -318,12 +318,17 @@ const voiceTitle = 'Дауыстық нұсқаулар: басып ауысты
 const cycleVoice = () => {
   voice.unlock()
   const order = ['kk', 'ru', 'off'] as const
-  voice.setLang(order[(order.indexOf(voice.lang.value) + 1) % order.length])
+  const next = order[(order.indexOf(voice.lang.value) + 1) % order.length]
+  voice.setLang(next)
+  if (next !== 'off') voice.sample()
 }
+
+const UNLOCK_EVENTS = ['click', 'touchend', 'keydown'] as const
+const onUserGesture = () => { if (!voice.unlocked.value) voice.unlock() }
 
 /** Әр кадрдан кейін: қазіргі кезеңге сай нұсқау (бірдей фраза жиі қайталанбайды) */
 const voicePrompt = () => {
-  if (processing.value || result.value || !(kiosk.value || autoScan.value)) return
+  if (processing.value || result.value) return
   if (!faceDetected.value) return
   if (stage.value === 'front1') voice.say('look_straight', { repeatAfterMs: 8000 })
   else if (stage.value === 'turn') voice.say('turn_head', { repeatAfterMs: 5000 })
@@ -459,7 +464,7 @@ const detectFaces = async () => {
     resetLiveness()
     if (detections.length > 1) {
       errorMsg.value = MULTI_FACE_MSG
-      if (kiosk.value || autoScan.value) voice.say('one_face', { repeatAfterMs: 8000 })
+      voice.say('one_face', { repeatAfterMs: 8000 })
     }
     return
   }
@@ -605,8 +610,8 @@ const onVisibility = () => {
 
 onMounted(async () => {
   voice.init()
-  // Экранды кез келген басу дыбысқа рұқсат береді
-  document.addEventListener('pointerdown', voice.unlock, { once: true })
+  // Экранды кез келген басу дыбысқа рұқсат береді (мобильдіде тек click/touchend жарайды)
+  for (const ev of UNLOCK_EVENTS) document.addEventListener(ev, onUserGesture, true)
   tick()
   clockTimer = setInterval(tick, 10_000)
   await loadKioskStatus()
@@ -620,7 +625,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stopped = true
-  document.removeEventListener('pointerdown', voice.unlock)
+  for (const ev of UNLOCK_EVENTS) document.removeEventListener(ev, onUserGesture, true)
   voice.stop()
   if (clockTimer) clearInterval(clockTimer)
   document.removeEventListener('visibilitychange', onVisibility)

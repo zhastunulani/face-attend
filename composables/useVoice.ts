@@ -49,18 +49,38 @@ export function useVoice() {
     }))
   }
 
-  /** Пайдаланушы экранды басқанда шақырылады — браузер дыбысқа рұқсат береді */
+  /**
+   * Пайдаланушы экранды басқанда шақырылады — браузер дыбысқа рұқсат береді.
+   * Мобильді браузерлерде бұл міндетті түрде `click`/`touchend` ішінде болуы керек
+   * (`pointerdown` саусақпен басқанда рұқсат бермейді).
+   */
   const unlock = () => {
     if (!supported) return
+    // iOS: дыбыссыз (silent) қосқышқа қарамай ойнату (Safari 16.4+)
+    try {
+      const session = (navigator as any).audioSession
+      if (session && session.type !== 'playback') session.type = 'playback'
+    } catch { /* ignore */ }
     if (!ctx) {
       const Ctx = window.AudioContext || (window as any).webkitAudioContext
       ctx = new Ctx()
+      // Қолданба фонға кетіп оралғанда iOS контекстті тоқтатады — баннер қайта шығады
+      ctx.onstatechange = () => { unlocked.value = ctx?.state === 'running' }
     }
-    ctx.resume().catch(() => {})
-    if (!unlocked.value) {
-      unlocked.value = true
-      preload()
-    }
+    // iOS-тың ескі нұсқалары үшін: gesture ішінде бос буферді ойнату
+    try {
+      const silent = ctx.createBufferSource()
+      silent.buffer = ctx.createBuffer(1, 1, 22050)
+      silent.connect(ctx.destination)
+      silent.start(0)
+    } catch { /* ignore */ }
+    const c = ctx
+    c.resume()
+      .then(() => {
+        unlocked.value = c.state === 'running'
+        if (unlocked.value) preload()
+      })
+      .catch(() => {})
   }
 
   const setLang = (v: VoiceLang) => {
@@ -76,6 +96,7 @@ export function useVoice() {
    */
   const say = (key: Phrase, opts: { repeatAfterMs?: number; interrupt?: boolean; delay?: number } = {}) => {
     if (!ctx || lang.value === 'off') return
+    if (ctx.state !== 'running') ctx.resume().catch(() => {})
     const now = Date.now()
     if (key === lastKey && now - lastAt < (opts.repeatAfterMs ?? 6000)) return
     const buf = buffers.get(`${lang.value}/${key}`)
@@ -92,6 +113,13 @@ export function useVoice() {
     current = src
     lastKey = key
     lastAt = now
+  }
+
+  /** Дыбысты тексеру: контекст іске қосылғанша күтіп, фразаны ойнату */
+  const sample = async (key: Phrase = 'look_straight') => {
+    for (let i = 0; i < 20 && ctx?.state !== 'running'; i++) await new Promise(r => setTimeout(r, 50))
+    await preload()
+    say(key, { interrupt: true, repeatAfterMs: 0 })
   }
 
   /** Қысқа сигнал: сәтті — екі жоғары нота, қате — бір төмен нота */
@@ -119,5 +147,5 @@ export function useVoice() {
     ctx = null
   }
 
-  return { supported, lang, unlocked, init, setLang, unlock, say, chime, stop }
+  return { supported, lang, unlocked, init, setLang, unlock, say, sample, chime, stop }
 }
