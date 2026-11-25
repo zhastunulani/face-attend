@@ -158,3 +158,18 @@ export function validateScheduleInput(body: any, partial: boolean) {
   }
   return out
 }
+
+/** минут -> "2 сағ 5 мин" (адамға түсінікті) */
+export function humanMinutes(min: number): string {
+  const h = Math.floor(min / 60)
+  const m = min % 60
+  if (!h) return `${m} мин`
+  return m ? `${h} сағ ${m} мин` : `${h} сағ`
+}
+
+/** Қызметкер жүйеге қосылған күн (ұйым уақыты бойынша). Осы күнге дейін «келмеді» есептелмейді. */
+export function startDateOf(createdAt: string | null | undefined): string {
+  if (!createdAt) return '0000-01-01'
+  const d = new Date(createdAt.includes('T') ? createdAt : createdAt.replace(' ', 'T'))
+  return Number.isNaN(d.getTime()) ? createdAt.slice(0, 10) : localNow(d).date
+}

@@ -139,37 +139,31 @@
         leave-from-class="opacity-100 translate-y-0"
         leave-to-class="opacity-0 translate-y-4"
       >
-        <div v-if="result" class="rounded-2xl p-5 shadow-pop border-l-4 bg-white" :class="result.success ? 'border-status-ok' : 'border-status-danger'">
-          <div class="flex items-start gap-4">
-            <div
-              class="w-14 h-14 rounded-full flex items-center justify-center text-2xl font-semibold shrink-0"
-              :class="result.success ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'"
-            >
-              {{ result.success ? result.employeeName?.charAt(0) || '?' : '!' }}
+        <div v-if="result" class="rounded-2xl bg-white shadow-pop overflow-hidden">
+          <!-- Тақырып: кім және не болды -->
+          <div class="flex items-center gap-4 px-5 py-4 text-white" :class="resultTone.head">
+            <div class="w-14 h-14 rounded-full bg-white/20 flex items-center justify-center text-2xl font-semibold shrink-0">
+              <AppIcon v-if="!result.employeeName" name="alert" class="w-7 h-7" />
+              <template v-else>{{ result.employeeName.charAt(0) }}</template>
             </div>
-            <div class="flex-1 min-w-0">
-              <p class="font-semibold text-gray-900 truncate" :class="kiosk ? 'text-2xl' : ''">
-                {{ result.success ? result.employeeName : 'Қате' }}
+            <div class="min-w-0">
+              <p class="text-sm/5 opacity-90">{{ resultTone.title }}</p>
+              <p class="font-semibold truncate" :class="kiosk ? 'text-2xl' : 'text-xl'">
+                {{ result.employeeName || 'Белгі қойылмады' }}
               </p>
-              <p class="text-gray-500 mt-0.5" :class="kiosk ? 'text-lg' : 'text-sm'">
-                {{ result.message }}
-              </p>
-              <div v-if="result.success" class="flex flex-wrap gap-2 mt-2">
-                <span class="text-xs px-2 py-0.5 rounded-full" :class="result.type === 'in' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'">
-                  {{ result.type === 'in' ? 'Келді' : 'Кетті' }}
-                </span>
-                <span class="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full">
-                  {{ result.time }}
-                </span>
-                <span v-if="result.isLate" class="text-xs px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full">
-                  Кешікті: {{ result.lateMinutes }} мин
-                </span>
-                <span v-if="result.overtimeMinutes" class="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">
-                  Үстеме: {{ result.overtimeMinutes }} мин
-                </span>
-              </div>
             </div>
           </div>
+
+          <!-- Негізгі сандар -->
+          <div v-if="result.success" class="grid grid-cols-3 divide-x divide-gray-100 border-b border-gray-100">
+            <div v-for="f in resultFacts" :key="f.label" class="px-3 py-3 text-center">
+              <p class="text-[11px] uppercase tracking-wide text-gray-400">{{ f.label }}</p>
+              <p class="font-semibold tabular-nums mt-0.5" :class="[f.tone, kiosk ? 'text-xl' : 'text-lg']">{{ f.value }}</p>
+            </div>
+          </div>
+
+          <!-- Түсіндірме -->
+          <p class="px-5 py-3 text-gray-600" :class="kiosk ? 'text-base' : 'text-sm'">{{ result.message }}</p>
         </div>
       </Transition>
 
@@ -208,7 +202,44 @@ const result = ref<{
   isLate?: boolean
   lateMinutes?: number
   overtimeMinutes?: number
+  earlyLeaveMinutes?: number
+  workedMinutes?: number
+  checkIn?: string
+  scheduleStart?: string | null
+  scheduleEnd?: string | null
 } | null>(null)
+
+const resultTone = computed(() => {
+  const r = result.value
+  if (!r?.success) return { head: 'bg-grad-dark', title: r?.employeeName ? 'Назар аударыңыз' : 'Қайталап көріңіз' }
+  if (r.type === 'in') {
+    return r.lateMinutes ? { head: 'bg-grad-orange', title: 'Келу тіркелді · кешігу' } : { head: 'bg-grad-green', title: 'Қош келдіңіз! Келу тіркелді' }
+  }
+  return r.earlyLeaveMinutes ? { head: 'bg-grad-orange', title: 'Кету тіркелді · ерте' } : { head: 'bg-grad-blue', title: 'Сау болыңыз! Кету тіркелді' }
+})
+
+const resultFacts = computed(() => {
+  const r = result.value
+  if (!r?.success) return []
+  if (r.type === 'in') {
+    return [
+      { label: 'Келдіңіз', value: r.time || '—', tone: 'text-navy' },
+      { label: 'Жұмыс басы', value: r.scheduleStart || '—', tone: 'text-gray-700' },
+      r.lateMinutes
+        ? { label: 'Кешігу', value: formatMinutes(r.lateMinutes), tone: 'text-orange-600' }
+        : { label: 'Күйі', value: r.scheduleStart ? 'Уақытында' : '—', tone: 'text-green-600' },
+    ]
+  }
+  return [
+    { label: 'Келу → кету', value: `${hhmm(r.checkIn)}–${r.time}`, tone: 'text-navy' },
+    { label: 'Жұмыс уақыты', value: formatMinutes(r.workedMinutes || 0), tone: 'text-gray-700' },
+    r.overtimeMinutes
+      ? { label: 'Үстеме', value: formatMinutes(r.overtimeMinutes), tone: 'text-primary-600' }
+      : r.earlyLeaveMinutes
+        ? { label: 'Ерте кету', value: formatMinutes(r.earlyLeaveMinutes), tone: 'text-orange-600' }
+        : { label: 'Жұмыс соңы', value: r.scheduleEnd || '—', tone: 'text-gray-700' },
+  ]
+})
 
 // ==================== Сағат ====================
 
@@ -446,6 +477,11 @@ const handleScan = async (type: 'in' | 'out' | 'auto') => {
       isLate?: boolean
       lateMinutes?: number
       overtimeMinutes?: number
+      earlyLeaveMinutes?: number
+      workedMinutes?: number
+      checkIn?: string
+      scheduleStart?: string | null
+      scheduleEnd?: string | null
       message?: string
     }>('/api/attendance/checkin', {
       method: 'POST',
@@ -461,6 +497,11 @@ const handleScan = async (type: 'in' | 'out' | 'auto') => {
       isLate: response.isLate,
       lateMinutes: response.lateMinutes,
       overtimeMinutes: response.overtimeMinutes,
+      earlyLeaveMinutes: response.earlyLeaveMinutes,
+      workedMinutes: response.workedMinutes,
+      checkIn: response.checkIn,
+      scheduleStart: response.scheduleStart,
+      scheduleEnd: response.scheduleEnd,
     }
   } catch (e: any) {
     result.value = {

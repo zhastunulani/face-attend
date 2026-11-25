@@ -12,48 +12,124 @@
     </div>
 
     <!-- ==================== Бүгін ==================== -->
-    <div v-if="activeTab === 'today'" class="card">
-      <div v-if="loadingToday" class="text-center py-8 text-gray-400">Жүктелуде...</div>
-      <div v-else-if="!todayRows.length" class="text-center py-8 text-gray-400">Деректер жоқ</div>
-      <div v-else class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="border-b border-gray-200 text-left text-gray-600">
-              <th class="pb-3 font-semibold">Қызметкер</th>
-              <th class="pb-3 font-semibold">Келу</th>
-              <th class="pb-3 font-semibold">Кету</th>
-              <th class="pb-3 font-semibold">Статус</th>
-              <th v-if="canEdit" class="pb-3" />
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="r in todayRows" :key="r.key" class="border-b border-gray-100 hover:bg-gray-50">
-              <td class="py-3 font-medium">{{ r.employeeName }}</td>
-              <td class="py-3">{{ hhmm(r.checkIn) }}</td>
-              <td class="py-3">{{ hhmm(r.checkOut) }}</td>
-              <td class="py-3">
-                <span v-if="!r.checkIn" class="text-xs px-2 py-0.5 bg-red-100 text-red-700 rounded-full">Келмеді</span>
-                <span v-else-if="r.isLate" class="text-xs px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full">Кешікті {{ r.lateMinutes }} мин</span>
-                <span v-else class="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded-full">Уақытында</span>
-                <span v-if="r.checkIn && !r.checkOut" class="ml-1 text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full">кеңседе</span>
-              </td>
-              <td v-if="canEdit" class="py-3 text-right">
-                <button class="text-primary-600 hover:underline text-sm" @click="openEditor(r.employeeId, r.employeeName, today, r.id ? r : null)">
-                  {{ r.id ? 'Түзету' : 'Белгі қою' }}
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <template v-if="activeTab === 'today'">
+      <div v-if="loadingToday && !todayData" class="card text-center py-8 text-gray-400">Жүктелуде...</div>
+      <template v-else-if="todayData">
+        <p class="text-sm text-gray-500 mb-3">
+          {{ longDateText(new Date()) }} · қазір {{ todayData.now }}
+          <span v-if="todayData.holiday" class="ml-1 badge bg-purple-100 text-purple-700">{{ todayData.holiday }}</span>
+        </p>
+
+        <!-- Қорытынды = сүзгі -->
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mb-4">
+          <button
+            v-for="f in todayFilters" :key="f.key" type="button"
+            class="rounded-xl border px-3 py-2.5 text-left transition-colors"
+            :class="todayFilter === f.key ? 'border-primary-600 bg-primary-50 ring-1 ring-primary-600' : 'border-gray-200 bg-white hover:border-gray-300'"
+            @click="todayFilter = f.key"
+          >
+            <p class="text-xs text-gray-500">{{ f.label }}</p>
+            <p class="text-xl font-semibold tabular-nums" :class="f.tone">{{ f.count }}</p>
+          </button>
+        </div>
+
+        <div class="card !p-0 overflow-hidden">
+          <div class="p-3 border-b border-gray-100">
+            <input v-model="todaySearch" class="input" placeholder="Қызметкерді іздеу..." />
+          </div>
+          <div v-if="!visibleToday.length" class="text-center py-8 text-gray-400">Бұл сүзгі бойынша ешкім жоқ</div>
+
+          <!-- Desktop: кесте -->
+          <table v-else class="hidden md:table w-full text-sm">
+            <thead class="bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
+              <tr>
+                <th class="px-4 py-2.5 font-semibold">Қызметкер</th>
+                <th class="px-4 py-2.5 font-semibold">Кесте</th>
+                <th class="px-4 py-2.5 font-semibold">Келді</th>
+                <th class="px-4 py-2.5 font-semibold">Кетті</th>
+                <th class="px-4 py-2.5 font-semibold">Жұмыс уақыты</th>
+                <th class="px-4 py-2.5 font-semibold">Күйі</th>
+                <th v-if="canEdit" class="px-4 py-2.5" />
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              <tr v-for="r in visibleToday" :key="r.employeeId" class="hover:bg-gray-50">
+                <td class="px-4 py-3">
+                  <p class="font-medium text-gray-900">{{ r.employeeName }}</p>
+                  <p v-if="r.departmentName" class="text-xs text-gray-500">{{ r.departmentName }}</p>
+                </td>
+                <td class="px-4 py-3 tabular-nums text-gray-600">
+                  <template v-if="r.schedule && r.isWorkDay">{{ r.schedule.start }}–{{ r.schedule.end }}</template>
+                  <span v-else-if="!r.isWorkDay" class="text-gray-400">демалыс күні</span>
+                  <span v-else class="text-gray-400">кестесіз</span>
+                </td>
+                <td class="px-4 py-3">
+                  <p class="tabular-nums font-medium">{{ r.checkIn ? hhmm(r.checkIn) : '' }}</p>
+                  <p v-if="r.lateMinutes" class="text-xs text-orange-600">{{ formatMinutes(r.lateMinutes) }} кеш</p>
+                  <p v-else-if="r.checkIn && r.schedule" class="text-xs text-green-600">уақытында</p>
+                </td>
+                <td class="px-4 py-3">
+                  <p class="tabular-nums font-medium">{{ r.checkOut ? hhmm(r.checkOut) : r.checkIn ? '—' : '' }}</p>
+                  <p v-if="r.earlyLeaveMinutes" class="text-xs text-orange-600">{{ formatMinutes(r.earlyLeaveMinutes) }} ерте</p>
+                  <p v-else-if="r.overtimeMinutes" class="text-xs text-primary-600">+{{ formatMinutes(r.overtimeMinutes) }} үстеме</p>
+                </td>
+                <td class="px-4 py-3 tabular-nums">
+                  <template v-if="r.checkIn">
+                    {{ formatMinutes(r.workedMinutes) }}
+                    <p v-if="!r.checkOut" class="text-xs text-gray-400">әлі жұмыста</p>
+                  </template>
+                </td>
+                <td class="px-4 py-3 whitespace-nowrap">
+                  <span class="badge" :class="STATUS[r.status].cls">{{ statusText(r) }}</span>
+                  <span v-if="r.edited" class="ml-1 text-xs text-gray-400" title="Қолмен түзетілген">✎</span>
+                </td>
+                <td v-if="canEdit" class="px-4 py-3 text-right">
+                  <button v-if="r.status !== 'leave'" class="text-primary-600 hover:underline text-sm" @click="openEditor(r.employeeId, r.employeeName, todayData.date, r.id ? r : null)">
+                    {{ r.id ? 'Түзету' : 'Белгі қою' }}
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <!-- Mobile: карточкалар -->
+          <ul v-if="visibleToday.length" class="md:hidden divide-y divide-gray-100">
+            <li v-for="r in visibleToday" :key="r.employeeId" class="px-4 py-3">
+              <div class="flex items-start justify-between gap-2">
+                <div class="min-w-0">
+                  <p class="font-medium text-gray-900 truncate">{{ r.employeeName }}</p>
+                  <p class="text-xs text-gray-500">
+                    <template v-if="r.schedule && r.isWorkDay">кесте {{ r.schedule.start }}–{{ r.schedule.end }}</template>
+                    <template v-else-if="!r.isWorkDay">демалыс күні</template>
+                  </p>
+                </div>
+                <span class="badge shrink-0" :class="STATUS[r.status].cls">{{ statusText(r) }}</span>
+              </div>
+              <div v-if="r.checkIn" class="mt-2 grid grid-cols-3 gap-2 text-sm">
+                <div><p class="text-xs text-gray-400">Келді</p><p class="tabular-nums font-medium">{{ hhmm(r.checkIn) }}</p></div>
+                <div><p class="text-xs text-gray-400">Кетті</p><p class="tabular-nums font-medium">{{ r.checkOut ? hhmm(r.checkOut) : '—' }}</p></div>
+                <div><p class="text-xs text-gray-400">Жұмыс</p><p class="tabular-nums font-medium">{{ formatMinutes(r.workedMinutes) }}</p></div>
+              </div>
+              <p v-if="r.lateMinutes || r.earlyLeaveMinutes || r.overtimeMinutes" class="mt-1 text-xs">
+                <span v-if="r.lateMinutes" class="text-orange-600">{{ formatMinutes(r.lateMinutes) }} кеш келді. </span>
+                <span v-if="r.earlyLeaveMinutes" class="text-orange-600">{{ formatMinutes(r.earlyLeaveMinutes) }} ерте кетті. </span>
+                <span v-if="r.overtimeMinutes" class="text-primary-600">+{{ formatMinutes(r.overtimeMinutes) }} үстеме.</span>
+              </p>
+              <button v-if="canEdit && r.status !== 'leave'" class="mt-2 text-primary-600 text-sm" @click="openEditor(r.employeeId, r.employeeName, todayData.date, r.id ? r : null)">
+                {{ r.id ? 'Түзету' : 'Белгі қою' }}
+              </button>
+            </li>
+          </ul>
+        </div>
+      </template>
+    </template>
 
     <!-- ==================== Айлық ==================== -->
     <div v-if="activeTab === 'monthly'" class="card !p-4 sm:!p-6">
       <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <div class="flex items-center gap-2">
           <button class="btn-secondary !px-3" aria-label="Алдыңғы ай" @click="shiftMonth(-1)">‹</button>
-          <input v-model="selectedMonth" type="month" class="input w-auto" @change="fetchMonthly" />
+          <span class="min-w-[9rem] text-center font-semibold text-navy">{{ monthLabel }}</span>
           <button class="btn-secondary !px-3" aria-label="Келесі ай" @click="shiftMonth(1)">›</button>
         </div>
         <div class="flex items-center gap-2">
@@ -74,7 +150,51 @@
 
       <div v-if="loadingMonthly" class="text-center py-8 text-gray-400">Жүктелуде...</div>
       <div v-else-if="!month?.employees.length" class="text-center py-8 text-gray-400">Деректер жоқ</div>
-      <div v-else class="overflow-x-auto -mx-4 sm:mx-0">
+      <template v-else>
+        <h2 class="text-sm font-semibold text-navy mb-2">Ай қорытындысы</h2>
+        <div class="overflow-x-auto -mx-4 sm:mx-0 mb-6">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-left text-xs text-gray-500">
+              <tr>
+                <th class="px-3 py-2 font-semibold">Қызметкер</th>
+                <th class="px-3 py-2 font-semibold">Келген күн</th>
+                <th class="px-3 py-2 font-semibold">Кешігу</th>
+                <th class="px-3 py-2 font-semibold">Келмеген</th>
+                <th class="px-3 py-2 font-semibold">Демалыс / ауру</th>
+                <th class="px-3 py-2 font-semibold">Жұмыс уақыты</th>
+                <th class="px-3 py-2 font-semibold">Үстеме</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              <tr v-for="e in month.employees" :key="e.employeeId">
+                <td class="px-3 py-2.5 font-medium text-gray-900 whitespace-nowrap">{{ e.employeeName }}</td>
+                <td class="px-3 py-2.5 whitespace-nowrap tabular-nums">
+                  <b>{{ e.daysPresent }}</b> <span class="text-gray-400">/ {{ e.plannedDays }} жоспар</span>
+                </td>
+                <td class="px-3 py-2.5 whitespace-nowrap tabular-nums">
+                  <template v-if="e.daysLate"><b class="text-orange-600">{{ e.daysLate }} рет</b> <span class="text-gray-500">· барлығы {{ formatMinutes(e.totalLateMinutes) }}</span></template>
+                  <span v-else class="text-gray-300">—</span>
+                </td>
+                <td class="px-3 py-2.5 whitespace-nowrap">
+                  <b v-if="e.absentDays" class="text-red-600">{{ e.absentDays }} күн</b>
+                  <span v-else class="text-gray-300">—</span>
+                </td>
+                <td class="px-3 py-2.5 whitespace-nowrap">
+                  <span v-if="e.leaveDayCount" class="text-purple-700">{{ e.leaveDayCount }} күн</span>
+                  <span v-else class="text-gray-300">—</span>
+                </td>
+                <td class="px-3 py-2.5 whitespace-nowrap tabular-nums"><b>{{ hoursText(e.totalWorkMinutes) }}</b></td>
+                <td class="px-3 py-2.5 whitespace-nowrap tabular-nums">
+                  <span v-if="e.totalOvertimeMinutes" class="text-primary-600">+{{ hoursText(e.totalOvertimeMinutes) }}</span>
+                  <span v-else class="text-gray-300">—</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h2 class="text-sm font-semibold text-navy mb-2">Күндер бойынша</h2>
+        <div class="overflow-x-auto -mx-4 sm:mx-0">
         <table class="text-xs border-separate border-spacing-0">
           <thead>
             <tr>
@@ -82,16 +202,12 @@
               <th
                 v-for="d in month.days" :key="d.date"
                 class="px-0.5 py-1 font-medium border-b border-gray-200 min-w-[2.6rem]"
-                :class="d.holiday ? 'text-purple-600' : d.weekday >= 6 ? 'text-gray-400' : 'text-gray-600'"
+                :class="d.date === month.today ? 'text-white bg-primary-600 rounded-t' : d.holiday ? 'text-purple-600' : d.weekday >= 6 ? 'text-gray-400' : 'text-gray-600'"
                 :title="d.holiday || ''"
               >
                 <div>{{ Number(d.date.slice(8)) }}</div>
                 <div class="font-normal">{{ WEEKDAYS_SHORT[d.weekday] }}</div>
               </th>
-              <th class="px-2 py-2 font-semibold text-gray-600 border-b border-gray-200" title="Келген / жоспар">Келді</th>
-              <th class="px-2 py-2 font-semibold text-gray-600 border-b border-gray-200">Кеш.</th>
-              <th class="px-2 py-2 font-semibold text-gray-600 border-b border-gray-200">Жоқ</th>
-              <th class="px-2 py-2 font-semibold text-gray-600 border-b border-gray-200">Сағ.</th>
             </tr>
           </thead>
           <tbody>
@@ -113,14 +229,11 @@
                   <template v-else-if="e.leaveDays[d.date]">{{ (LEAVE_LABELS[e.leaveDays[d.date]] || '').slice(0, 3) }}</template>
                 </button>
               </td>
-              <td class="px-2 text-center border-b border-gray-100 whitespace-nowrap">{{ e.daysPresent }}/{{ e.plannedDays }}</td>
-              <td class="px-2 text-center border-b border-gray-100" :class="e.daysLate ? 'text-yellow-600 font-semibold' : ''">{{ e.daysLate }}</td>
-              <td class="px-2 text-center border-b border-gray-100" :class="e.absentDays ? 'text-red-600 font-semibold' : ''">{{ e.absentDays }}</td>
-              <td class="px-2 text-center border-b border-gray-100">{{ (e.totalWorkMinutes / 60).toFixed(1) }}</td>
             </tr>
           </tbody>
         </table>
-      </div>
+        </div>
+      </template>
     </div>
 
     <!-- ==================== Түзету ==================== -->
@@ -171,19 +284,88 @@ const activeTab = ref<'today' | 'monthly'>(route.query.tab === 'monthly' ? 'mont
 
 // ==================== Бүгін ====================
 
+type TodayStatus = 'in_office' | 'left' | 'expected' | 'absent' | 'leave' | 'day_off'
+interface TodayRow {
+  employeeId: number
+  employeeName: string
+  departmentName: string | null
+  schedule: { name: string; start: string; end: string } | null
+  isWorkDay: boolean
+  status: TodayStatus
+  leaveType: string | null
+  id: number | null
+  checkIn: string | null
+  checkOut: string | null
+  lateMinutes: number
+  overtimeMinutes: number
+  earlyLeaveMinutes: number
+  workedMinutes: number
+  edited: boolean
+}
+interface TodayData {
+  date: string
+  now: string
+  holiday: string | null
+  rows: TodayRow[]
+  stats: Record<string, number>
+}
+
+const STATUS: Record<TodayStatus, { label: string; cls: string; order: number }> = {
+  absent: { label: 'Келмеді', cls: 'bg-red-100 text-red-700', order: 0 },
+  in_office: { label: 'Кеңседе', cls: 'bg-green-100 text-green-700', order: 1 },
+  left: { label: 'Кетті', cls: 'bg-gray-100 text-gray-700', order: 2 },
+  expected: { label: 'Күтілуде', cls: 'bg-blue-50 text-blue-700', order: 3 },
+  leave: { label: 'Демалыста', cls: 'bg-purple-100 text-purple-700', order: 4 },
+  day_off: { label: 'Демалыс күні', cls: 'bg-gray-50 text-gray-400', order: 5 },
+}
+const statusText = (r: TodayRow) =>
+  r.status === 'leave' ? (LEAVE_LABELS[r.leaveType || ''] || 'Демалыста')
+    : r.status === 'expected' && r.schedule ? `${r.schedule.start}-де күтілуде`
+      : STATUS[r.status].label
+
 const loadingToday = ref(true)
-const today = ref('')
-const todayRows = ref<any[]>([])
+const todayData = ref<TodayData | null>(null)
+const today = computed(() => todayData.value?.date || '')
+type TodayFilter = 'all' | 'in_office' | 'late' | 'absent' | 'left' | 'away'
+const todayFilter = ref<TodayFilter>('all')
+const todaySearch = ref('')
+
+const todayFilters = computed(() => {
+  const s = todayData.value?.stats || {}
+  const list: { key: TodayFilter; label: string; count: number; tone: string }[] = [
+    { key: 'all', label: 'Барлығы', count: s.total ?? 0, tone: 'text-navy' },
+    { key: 'in_office', label: 'Қазір кеңседе', count: s.inOffice ?? 0, tone: 'text-green-600' },
+    { key: 'late', label: 'Кешіккендер', count: s.late ?? 0, tone: 'text-orange-600' },
+    { key: 'absent', label: 'Келмегендер', count: s.absent ?? 0, tone: 'text-red-600' },
+    { key: 'left', label: 'Кеткендер', count: s.left ?? 0, tone: 'text-gray-700' },
+    { key: 'away', label: 'Демалыс / күтілуде', count: (s.leave ?? 0) + (s.dayOff ?? 0) + (s.expected ?? 0), tone: 'text-purple-600' },
+  ]
+  return list
+})
+
+const visibleToday = computed(() => {
+  const q = todaySearch.value.trim().toLowerCase()
+  return (todayData.value?.rows || [])
+    .filter((r) => {
+      if (q && !r.employeeName.toLowerCase().includes(q)) return false
+      switch (todayFilter.value) {
+        case 'in_office': return r.status === 'in_office'
+        case 'late': return r.lateMinutes > 0
+        case 'absent': return r.status === 'absent'
+        case 'left': return r.status === 'left'
+        case 'away': return ['leave', 'day_off', 'expected'].includes(r.status)
+        default: return true
+      }
+    })
+    .sort((a, b) => STATUS[a.status].order - STATUS[b.status].order
+      || (a.checkIn || '99').localeCompare(b.checkIn || '99')
+      || a.employeeName.localeCompare(b.employeeName))
+})
 
 const fetchToday = async () => {
   loadingToday.value = true
   try {
-    const data = await $fetch<any>('/api/attendance/today')
-    today.value = data.date
-    todayRows.value = [
-      ...data.present.map((r: any) => ({ ...r, key: `p${r.id}` })),
-      ...data.absent.map((e: any) => ({ key: `a${e.id}`, employeeId: e.id, employeeName: e.name })),
-    ]
+    todayData.value = await $fetch<TodayData>('/api/attendance/today')
   } catch (e) {
     notifyError(e)
   } finally {
@@ -200,6 +382,7 @@ interface MonthData {
   employees: {
     employeeId: number
     employeeName: string
+    startDate: string
     workDays: number[]
     plannedDays: number
     daysPresent: number
@@ -207,14 +390,20 @@ interface MonthData {
     absentDays: number
     totalWorkMinutes: number
     totalOvertimeMinutes: number
+    totalLateMinutes: number
     cells: Record<string, { id: number; checkIn: string | null; checkOut: string | null; isLate: boolean; lateMinutes: number; overtimeMinutes: number }>
     leaveDays: Record<string, string>
+    leaveDayCount: number
   }[]
 }
 
 const now = new Date()
 const selectedMonth = ref(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`)
 const loadingMonthly = ref(false)
+const monthLabel = computed(() => {
+  const [y, m] = selectedMonth.value.split('-').map(Number)
+  return `${MONTHS[m - 1]} ${y}`
+})
 const month = ref<MonthData | null>(null)
 
 const fetchMonthly = async () => {
@@ -239,6 +428,9 @@ const shiftMonth = (delta: number) => {
 type Emp = MonthData['employees'][number]
 type Day = MonthData['days'][number]
 
+/** 7530 мин -> "125,5 сағ" */
+const hoursText = (min: number) => `${(Math.round(min / 6) / 10).toString().replace('.', ',')} сағ`
+
 const isWorkDay = (e: Emp, d: Day) => e.workDays.includes(d.weekday) && !d.holiday
 
 const cellClass = (e: Emp, d: Day) => {
@@ -248,7 +440,7 @@ const cellClass = (e: Emp, d: Day) => {
     return c.isLate ? 'bg-yellow-100 border-yellow-300 text-yellow-800' : 'bg-green-100 border-green-300 text-green-800'
   }
   if (e.leaveDays[d.date]) return 'bg-purple-100 border-purple-300 text-purple-700'
-  if (!isWorkDay(e, d)) return 'bg-gray-50 border-gray-100 text-gray-300'
+  if (!isWorkDay(e, d) || d.date < e.startDate) return 'bg-gray-50 border-gray-100 text-gray-300'
   if (d.date <= (month.value?.today || '')) return 'bg-red-50 border-red-200 text-red-400'
   return 'bg-white border-gray-100'
 }
@@ -259,9 +451,12 @@ const cellTitle = (e: Emp, d: Day) => {
   if (d.holiday) parts.push(d.holiday)
   if (c?.checkIn) {
     parts.push(`${hhmm(c.checkIn)}–${c.checkOut ? hhmm(c.checkOut) : '?'}`)
-    if (c.isLate) parts.push(`кешікті ${c.lateMinutes} мин`)
-    if (c.overtimeMinutes) parts.push(`үстеме ${c.overtimeMinutes} мин`)
+    if (c.isLate) parts.push(`${formatMinutes(c.lateMinutes)} кеш келді`)
+    if (c.overtimeMinutes) parts.push(`+${formatMinutes(c.overtimeMinutes)} үстеме`)
   } else if (e.leaveDays[d.date]) parts.push(LEAVE_LABELS[e.leaveDays[d.date]] || '')
+  else if (d.date < e.startDate) parts.push('әлі жұмыста емес')
+  else if (!isWorkDay(e, d)) parts.push('демалыс күні')
+  else if (d.date <= (month.value?.today || '')) parts.push('келмеді')
   return parts.join(' · ')
 }
 
@@ -300,7 +495,7 @@ const editor = ref<{
 } | null>(null)
 const savingEditor = ref(false)
 
-const openEditor = (employeeId: number, employeeName: string, date: string, record: { id: number; checkIn: string | null; checkOut: string | null } | null) => {
+const openEditor = (employeeId: number, employeeName: string, date: string, record: { id: number | null; checkIn: string | null; checkOut: string | null } | null) => {
   if (!canEdit.value || !date) return
   editor.value = {
     employeeId,

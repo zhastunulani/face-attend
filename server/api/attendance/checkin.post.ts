@@ -5,7 +5,7 @@ import { getKiosk, getAuthUser } from '~/server/utils/auth'
 import { parseDescriptor, matchFace } from '~/server/utils/face'
 import { saveImage } from '~/server/utils/files'
 import { audit, hitRateLimit, clientIp } from '~/server/utils/audit'
-import { localNow, addDays, workedMinutes, lateMinutesFor, overtimeMinutesFor } from '~/server/utils/time'
+import { localNow, addDays, workedMinutes, lateMinutesFor, overtimeMinutesFor, toMinutes, humanMinutes } from '~/server/utils/time'
 
 const MIN_WORK_MINUTES = 30
 const MAX_SHIFT_MINUTES = 18 * 60 // түнгі ауысымды кешегі күнге жатқызу шегі
@@ -76,7 +76,11 @@ export default defineEventHandler(async (event) => {
 
   const action: 'in' | 'out' = type === 'auto' ? (open ? 'out' : 'in') : type
   if (type === 'auto' && open && workedMinutes(open.checkIn!, now.time) < MIN_WORK_MINUTES) {
-    return { success: false, employeeName: employee.name, message: `${employee.name}: келу ${open.checkIn!.slice(0, 5)} тіркелген`, time: open.checkIn }
+    const wait = MIN_WORK_MINUTES - workedMinutes(open.checkIn!, now.time)
+    return {
+      success: false, code: 'already_in', employeeName: employee.name, time: open.checkIn,
+      message: `Келуіңіз ${open.checkIn!.slice(0, 5)}-де тіркелген. Кетуді ${wait} минуттан кейін белгілеуге болады`,
+    }
   }
 
   const photoPath = body.photo ? await saveImage(body.photo, 'checkin') : null
@@ -85,10 +89,10 @@ export default defineEventHandler(async (event) => {
   // 5. Келу
   if (action === 'in') {
     if (today?.checkIn) {
-      return { success: false, employeeName: employee.name, message: 'Бүгін келу тіркелген', time: today.checkIn }
+      return { success: false, code: 'already_in', employeeName: employee.name, message: `Бүгінгі келуіңіз ${today.checkIn.slice(0, 5)}-де тіркелген`, time: today.checkIn }
     }
     if (open) {
-      return { success: false, employeeName: employee.name, message: 'Алдыңғы ауысымнан кету тіркелмеген', time: open.checkIn }
+      return { success: false, code: 'open_shift', employeeName: employee.name, message: `Алдыңғы ауысымнан (${open.checkIn!.slice(0, 5)}) кету белгіленбеген. Әкімшіге хабарлаңыз`, time: open.checkIn }
     }
     const lateMinutes = lateMinutesFor(now.minutes, schedule)
     const values = {
@@ -107,7 +111,7 @@ export default defineEventHandler(async (event) => {
       const inserted = await db.insert(attendance).values({ employeeId: employee.id, date: now.date, ...values })
         .onConflictDoNothing().returning()
       if (!inserted.length) {
-        return { success: false, employeeName: employee.name, message: 'Бүгін келу тіркелген' }
+        return { success: false, code: 'already_in', employeeName: employee.name, message: 'Бүгінгі келуіңіз тіркелген' }
       }
     }
     await audit(actorId, 'checkin', { source, employeeId: employee.id, distance: Number(match.distance.toFixed(3)) })
@@ -119,14 +123,18 @@ export default defineEventHandler(async (event) => {
       time: now.time,
       isLate: lateMinutes > 0,
       lateMinutes,
-      message: lateMinutes > 0 ? `${employee.name} — кешігу: ${lateMinutes} мин` : `${employee.name} — келді`,
+      scheduleStart: schedule?.workStart ?? null,
+      scheduleEnd: schedule?.workEnd ?? null,
+      message: lateMinutes > 0
+        ? `Жұмыс ${schedule!.workStart}-де басталады — ${humanMinutes(lateMinutes)} кешіктіңіз`
+        : schedule ? `Жұмыс ${schedule.workStart}-де басталады — уақытында келдіңіз` : 'Келуіңіз тіркелді',
     }
   }
 
   // 6. Кету
   if (!open) {
     if (today?.checkOut) {
-      return { success: false, employeeName: employee.name, message: 'Бүгін кету тіркелген', time: today.checkOut }
+      return { success: false, code: 'already_out', employeeName: employee.name, message: `Бүгінгі кетуіңіз ${today.checkOut.slice(0, 5)}-де тіркелген`, time: today.checkOut }
     }
     throw fail(400, 'Алдымен келуді тіркеңіз')
   }
@@ -143,14 +151,27 @@ export default defineEventHandler(async (event) => {
   }
   await audit(actorId, 'checkout', { source, employeeId: employee.id, distance: Number(match.distance.toFixed(3)) })
 
+  // Ерте кету (күндізгі кестеде ғана)
+  let earlyLeaveMinutes = 0
+  if (schedule && toMinutes(schedule.workEnd) > toMinutes(schedule.workStart) && toMinutes(now.time) > toMinutes(open.checkIn!)) {
+    earlyLeaveMinutes = Math.max(0, toMinutes(schedule.workEnd) - now.minutes)
+  }
+
   return {
     success: true,
     employeeName: employee.name,
     type: 'out',
     time: now.time,
+    checkIn: open.checkIn,
+    workedMinutes: worked,
     overtimeMinutes,
+    earlyLeaveMinutes,
+    scheduleStart: schedule?.workStart ?? null,
+    scheduleEnd: schedule?.workEnd ?? null,
     message: overtimeMinutes > 0
-      ? `${employee.name} — кетті (үстеме: ${overtimeMinutes} мин)`
-      : `${employee.name} — кетті`,
+      ? `Бүгін ${humanMinutes(worked)} жұмыс істедіңіз, оның ${humanMinutes(overtimeMinutes)} — үстеме`
+      : earlyLeaveMinutes > 0
+        ? `Жұмыс ${schedule!.workEnd}-де аяқталады — ${humanMinutes(earlyLeaveMinutes)} ерте кеттіңіз`
+        : `Бүгін ${humanMinutes(worked)} жұмыс істедіңіз`,
   }
 })

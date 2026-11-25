@@ -3,7 +3,7 @@ import { db } from '~/server/db'
 import { employees, schedules, leaves } from '~/server/db/schema'
 import { requireAuth, departmentScope } from '~/server/utils/auth'
 import { parsePeriod, monthAttendance } from '~/server/utils/period'
-import { workedMinutes, weekdayOf, monthDays, parseWorkDays, localNow } from '~/server/utils/time'
+import { workedMinutes, weekdayOf, monthDays, parseWorkDays, localNow, startDateOf } from '~/server/utils/time'
 import { loadHolidays, monthRange } from '~/server/utils/holidays'
 
 /**
@@ -25,6 +25,7 @@ export default defineEventHandler(async (event) => {
   if (scope !== null) conds.push(eq(employees.departmentId, scope))
   const emps = await db.select({
     id: employees.id, name: employees.name, departmentId: employees.departmentId, scheduleId: employees.scheduleId,
+    createdAt: employees.createdAt,
   }).from(employees).where(and(...conds)).orderBy(employees.name)
 
   const scheduleMap = new Map((await db.select().from(schedules)).map(s => [s.id, s]))
@@ -42,6 +43,7 @@ export default defineEventHandler(async (event) => {
   const result = emps.map((emp) => {
     const workDays = parseWorkDays(emp.scheduleId ? scheduleMap.get(emp.scheduleId)?.workDays : null)
     const empLeaves = approvedLeaves.filter(l => l.employeeId === emp.id)
+    const startDate = startDateOf(emp.createdAt)
     const cells: Record<string, any> = {}
     const leaveDays: Record<string, string> = {}
     let daysPresent = 0, daysLate = 0, absentDays = 0, plannedDays = 0
@@ -64,7 +66,8 @@ export default defineEventHandler(async (event) => {
       const leave = empLeaves.find(l => l.startDate <= d.date && d.date <= l.endDate)
       if (leave) leaveDays[d.date] = leave.type
       const isWorkDay = workDays.includes(d.weekday) && !d.holiday
-      if (!isWorkDay) continue
+      // Жұмысқа қосылғанға дейінгі күндер жоспарға да, «келмеді»-ге де кірмейді
+      if (!isWorkDay || (d.date < startDate && !cells[d.date]?.checkIn)) continue
       plannedDays++
       if (d.date <= today && !leave && !cells[d.date]?.checkIn) absentDays++
     }
@@ -72,6 +75,7 @@ export default defineEventHandler(async (event) => {
     return {
       employeeId: emp.id,
       employeeName: emp.name,
+      startDate,
       departmentId: emp.departmentId,
       workDays,
       plannedDays,

@@ -3,7 +3,7 @@ import { kpiTargets, attendance, employees, departments, schedules, leaves } fro
 import { eq, like, and } from 'drizzle-orm'
 import { requireAuth, departmentScope } from '~/server/utils/auth'
 import { parsePeriod } from '~/server/utils/period'
-import { localNow, parseWorkDays, plannedWorkDates } from '~/server/utils/time'
+import { localNow, parseWorkDays, plannedWorkDates, startDateOf } from '~/server/utils/time'
 import { loadHolidays, monthRange } from '~/server/utils/holidays'
 
 export default defineEventHandler(async (event) => {
@@ -45,7 +45,8 @@ export default defineEventHandler(async (event) => {
       const planned = plannedWorkDates(year, month, parseWorkDays(schedule?.workDays), until, holidaySet)
       // Бекітілген демалыс/больничный күндері күтілетін күндерге кірмейді
       const empLeaves = approvedLeaves.filter(l => l.employeeId === emp.id)
-      const expected = planned.filter(d => !empLeaves.some(l => l.startDate <= d && d <= l.endDate))
+      const startDate = startDateOf(emp.createdAt)
+      const expected = planned.filter(d => d >= startDate && !empLeaves.some(l => l.startDate <= d && d <= l.endDate))
 
       const empRecords = records.filter(r => r.employeeId === emp.id)
       totalPresent += empRecords.filter(r => r.checkIn && expected.includes(r.date)).length
