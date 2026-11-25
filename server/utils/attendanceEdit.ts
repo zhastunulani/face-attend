@@ -3,7 +3,7 @@ import { db } from '~/server/db'
 import { employees, schedules, salarySettings } from '~/server/db/schema'
 import type { AuthUser } from '~/server/utils/auth'
 import { assertDepartmentAccess } from '~/server/utils/auth'
-import { toMinutes, lateMinutesFor, overtimeMinutesFor } from '~/server/utils/time'
+import { toMinutes, lateMinutesFor, overtimeMinutesFor, weekdayOf } from '~/server/utils/time'
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/
 
@@ -20,7 +20,7 @@ function normTime(v: unknown, field: string): string | null {
  * Қолмен түзетудің ортақ логикасы: уақытты тексеру, кешігу мен үстемені кесте бойынша қайта есептеу.
  * Себеп (note) міндетті — бұл жалақыға әсер ететін өзгеріс.
  */
-export async function buildManualRecord(user: AuthUser, employeeId: number, body: any) {
+export async function buildManualRecord(user: AuthUser, employeeId: number, date: string, body: any) {
   const [emp] = await db.select().from(employees).where(eq(employees.id, employeeId))
   if (!emp) throw createError({ statusCode: 404, statusMessage: 'Not found', message: 'Қызметкер табылмады' })
   assertDepartmentAccess(user, emp.departmentId)
@@ -35,7 +35,7 @@ export async function buildManualRecord(user: AuthUser, employeeId: number, body
 
   const [schedule] = emp.scheduleId ? await db.select().from(schedules).where(eq(schedules.id, emp.scheduleId)) : [null]
   const [settings] = await db.select().from(salarySettings)
-  const lateMinutes = lateMinutesFor(toMinutes(checkIn), schedule)
+  const lateMinutes = lateMinutesFor(toMinutes(checkIn), schedule, weekdayOf(date))
   const overtimeMinutes = checkOut ? overtimeMinutesFor(checkIn, checkOut, schedule, settings?.standardHoursPerDay ?? 8) : 0
 
   return {

@@ -97,13 +97,30 @@ export function plannedWorkDates(
 export interface ScheduleLike {
   workStart: string
   workEnd: string
+  workDays?: string | null
 }
 
-/** Кесте бойынша кешігу минуттары */
-export function lateMinutesFor(checkInMinutes: number, schedule: ScheduleLike | null, graceMinutes = 0): number {
+/**
+ * Кесте бойынша кешігу минуттары.
+ * Кешігу ЕМЕС:
+ *  - кесте бойынша демалыс күні келсе (weekday берілсе);
+ *  - жұмыс уақыты аяқталғаннан кейін келсе (кестеден тыс келу — бұл кешігу емес).
+ * Түнгі ауысымда (аяғы < басы) жұмыс басынан кейінгі түн ортасына дейінгі уақыт қана тексеріледі.
+ */
+export function lateMinutesFor(
+  checkInMinutes: number,
+  schedule: ScheduleLike | null,
+  weekday?: number,
+  graceMinutes = 0,
+): number {
   if (!schedule) return 0
-  const late = checkInMinutes - toMinutes(schedule.workStart)
-  return late > graceMinutes ? late : 0
+  if (weekday !== undefined && !parseWorkDays(schedule.workDays).includes(weekday)) return 0
+  const start = toMinutes(schedule.workStart)
+  const end = toMinutes(schedule.workEnd)
+  const late = checkInMinutes - start
+  if (late <= graceMinutes) return 0
+  if (end > start && checkInMinutes >= end) return 0 // күндізгі кесте: жұмыс бітіп қойған
+  return late
 }
 
 /** Кесте бойынша үстеме минуттар (кесте аяқталғаннан кейін). Түнгі ауысымды ескереді. */

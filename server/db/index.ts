@@ -199,6 +199,22 @@ async function initDatabase() {
       console.warn('payroll unique index was not created (duplicates exist?):', (e as Error).message)
     }
 
+    // Кешігу ережесі (v3): кестеден тыс келу (жұмыс біткеннен кейін) және демалыс күні келу — кешігу емес.
+    // Ескі жазбаларды түзету; идемпотентті, түзетілетін жазба қалмаса ештеңе өзгермейді.
+    try {
+      const fixed = await client.query(`
+        UPDATE attendance a SET is_late = false, late_minutes = 0
+        FROM employees e JOIN schedules s ON s.id = e.schedule_id
+        WHERE a.employee_id = e.id AND a.late_minutes > 0 AND a.check_in IS NOT NULL
+          AND (
+            (s.work_end > s.work_start AND substr(a.check_in, 1, 5) >= s.work_end)
+            OR NOT (s.work_days::jsonb @> to_jsonb(extract(isodow FROM a.date::date)::int))
+          )`)
+      if (fixed.rowCount) console.log(`late_minutes recalculated for ${fixed.rowCount} attendance rows`)
+    } catch (e) {
+      console.warn('late recalculation skipped:', (e as Error).message)
+    }
+
     // Seed: default departments
     const deptCheck = await client.query('SELECT id FROM departments LIMIT 1')
     if (deptCheck.rows.length === 0) {

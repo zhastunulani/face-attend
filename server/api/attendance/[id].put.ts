@@ -15,7 +15,7 @@ export default defineEventHandler(async (event) => {
   if (!existing) throw createError({ statusCode: 404, statusMessage: 'Not found', message: 'Жазба табылмады' })
 
   const body = await readBody(event)
-  const { values } = await buildManualRecord(user, existing.employeeId, body)
+  const { values } = await buildManualRecord(user, existing.employeeId, existing.date, body)
   const [updated] = await db.update(attendance).set(values).where(eq(attendance.id, id)).returning()
 
   await audit(user.id, 'attendance_corrected', {

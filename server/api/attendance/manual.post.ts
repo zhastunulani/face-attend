@@ -17,7 +17,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Future date', message: 'Болашақ күнге белгі қоюға болмайды' })
   }
 
-  const { values } = await buildManualRecord(user, employeeId, body)
+  const { values } = await buildManualRecord(user, employeeId, body.date, body)
   const inserted = await db.insert(attendance).values({ employeeId, date: body.date, ...values })
     .onConflictDoNothing().returning()
   if (!inserted.length) {

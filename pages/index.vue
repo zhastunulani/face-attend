@@ -57,7 +57,7 @@
                 <p class="text-xs text-gray-400">келді {{ hhmm(p.checkIn) }}</p>
               </div>
             </div>
-            <span v-if="p.isLate" class="text-xs px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full">+{{ p.lateMinutes }} мин</span>
+            <span v-if="p.isLate" class="text-xs px-2 py-0.5 bg-orange-100 text-orange-700 rounded-full whitespace-nowrap">{{ formatMinutes(p.lateMinutes) }} кеш</span>
           </li>
         </ul>
         <div v-if="data?.left.length" class="mt-4 pt-4 border-t border-gray-100">
@@ -85,7 +85,7 @@
           <h2 class="text-base font-semibold text-navy mb-3">Кешіккендер</h2>
           <ul class="space-y-1.5">
             <li v-for="p in data.late" :key="p.employeeId" class="text-sm flex justify-between">
-              <span>{{ p.name }}</span><span class="text-yellow-600">{{ hhmm(p.checkIn) }} (+{{ p.lateMinutes }} мин)</span>
+              <span>{{ p.name }}</span><span class="text-orange-600 whitespace-nowrap">{{ hhmm(p.checkIn) }} · {{ formatMinutes(p.lateMinutes) }} кеш</span>
             </li>
           </ul>
         </div>

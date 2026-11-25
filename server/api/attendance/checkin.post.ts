@@ -94,7 +94,7 @@ export default defineEventHandler(async (event) => {
     if (open) {
       return { success: false, code: 'open_shift', employeeName: employee.name, message: `Алдыңғы ауысымнан (${open.checkIn!.slice(0, 5)}) кету белгіленбеген. Әкімшіге хабарлаңыз`, time: open.checkIn }
     }
-    const lateMinutes = lateMinutesFor(now.minutes, schedule)
+    const lateMinutes = lateMinutesFor(now.minutes, schedule, now.weekday)
     const values = {
       checkIn: now.time,
       checkInPhoto: photoPath,
