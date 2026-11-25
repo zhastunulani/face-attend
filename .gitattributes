@@ -1,3 +1,5 @@
 # Скрипты и конфиги для Linux-сервера — всегда LF
 *.sh text eol=lf
 deploy/** text eol=lf
+android/gradlew eol=lf
+*.bat eol=crlf

@@ -3,7 +3,7 @@
     <!-- Top bar -->
     <div class="bg-navy text-white px-4 sm:px-6 h-16 flex items-center justify-between sticky top-0 z-30">
       <div class="flex items-center gap-3">
-        <NuxtLink v-if="!kiosk" to="/" class="p-2 -ml-2 rounded-lg text-white/70 hover:text-white hover:bg-white/10" aria-label="Артқа">
+        <NuxtLink v-if="!kiosk && !inApp" to="/" class="p-2 -ml-2 rounded-lg text-white/70 hover:text-white hover:bg-white/10" aria-label="Артқа">
           <AppIcon name="chevron-left" />
         </NuxtLink>
         <!-- 8 рет басу — әкімші режимі (қолданбада) немесе кіру беті (браузерде) -->
@@ -54,7 +54,7 @@
           <span v-if="kiosk" class="text-xs text-gray-400">· {{ kiosk.name }} · {{ modeLabel }}</span>
         </div>
         <button
-          v-if="!kiosk"
+          v-if="!kiosk && canScan && !inApp"
           @click="autoScan = !autoScan"
           class="text-sm px-3 py-1.5 rounded-lg font-medium transition-colors"
           :class="autoScan
@@ -320,6 +320,8 @@ const ADMIN_TAPS = 8
 let taps = 0
 let tapTimer: ReturnType<typeof setTimeout> | null = null
 const tapHint = ref('')
+/** Android киоск-қолданбасының ішінде ашылды ма */
+const inApp = ref(false)
 const appBridge = (): { openAdmin: () => void } | null =>
   import.meta.client ? (window as any).FaceAttendApp ?? null : null
 
@@ -642,7 +644,8 @@ const onVisibility = () => {
 onMounted(async () => {
   voice.init()
   // Қолданбаның WebView-ында дыбыс басусыз рұқсат етілген
-  if (appBridge()) voice.unlock()
+  inApp.value = !!appBridge()
+  if (inApp.value) voice.unlock()
   // Экранды кез келген басу дыбысқа рұқсат береді (мобильдіде тек click/touchend жарайды)
   for (const ev of UNLOCK_EVENTS) document.addEventListener(ev, onUserGesture, true)
   tick()
